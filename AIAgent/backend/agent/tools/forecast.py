@@ -4,12 +4,12 @@
 Используют модели NeuralProphet и ARIMA для построения
 прогнозов на основе временных рядов.
 """
-
 import logging
 from typing import Optional
 
 from smolagents import tool
 
+from agent.state import get_session_manager
 from services.forecast import get_forecast
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,8 @@ def build_forecast(
         periods: int = 30,
         model_type: str = "neuralprophet",
         forecast_type: str = "general",
-        store_ids: Optional[str] = None
+        store_ids: Optional[str] = None,
+        session_id: Optional[str] = None
 ) -> dict:
     """
     Построить прогноз продаж на указанный горизонт.
@@ -34,6 +35,7 @@ def build_forecast(
         model_type: Тип модели: "neuralprophet" или "arima"
         forecast_type: "general" (общий) или "by_store" (по магазинам)
         store_ids: Список ID магазинов через запятую (опционально)
+        session_id: ID сессии (опционально)
 
     Returns:
         Словарь с результатом:
@@ -46,18 +48,49 @@ def build_forecast(
             periods=90,
             model_type="neuralprophet",
             forecast_type="by_store",
-            store_ids="store_1,store_2"
+            store_ids="store_1,store_2",
+            session_id="user_123"
         )
     """
-    from agent.state import get_current_dataset, get_global_state
 
-    # Получаем датасет из глобального состояния
-    df = get_current_dataset()
+    # Получаем менеджер сессий
+    session_manager = get_session_manager()
+
+    # Если session_id не передан — используем дефолт
+    if session_id is None:
+        session_id = "default"
+        logger.warning("⚠️ session_id не передан, используется 'default'")
+
+    # Получаем датасет для конкретной сессии
+    df = session_manager.get_dataset(session_id)
     if df is None:
+        logger.warning(f"❌ Датасет не загружен для сессии {session_id[:8]}")
         return {
             "error": "Датасет не загружен. Сначала вызовите load_dataset.",
             "status": "error"
         }
+
+    # Валидация параметров
+    errors = []
+
+    if not isinstance(periods, int):
+        errors.append("periods должен быть целым числом")
+    else:
+        if periods < 7:
+            periods = 7
+        elif periods > 365:
+            periods = 365
+
+    valid_models = ["neuralprophet", "sarima", "auto"]
+    if model_type not in valid_models:
+        errors.append(f"model_type должен быть одним из: {valid_models}")
+
+    valid_types = ["general", "by_store"]
+    if forecast_type not in valid_types:
+        errors.append(f"forecast_type должен быть одним из: {valid_types}")
+
+    if errors:
+        return {"error": "; ".join(errors), "status": "error"}
 
     # Парсим список магазинов
     store_list = None
@@ -65,6 +98,8 @@ def build_forecast(
         store_list = [s.strip() for s in store_ids.split(",")]
 
     try:
+        logger.info(f"🔮 Построение прогноза: {model_type}, {periods} дней, {forecast_type}")
+
         # Вызываем сервис прогнозирования
         result = get_forecast(
             df=df,
@@ -74,15 +109,15 @@ def build_forecast(
             store_ids=store_list
         )
 
-        # Сохраняем результат в глобальное состояние для последующего анализа
-        if "forecast" in result:
-            state = get_global_state()
-            state["last_forecast"] = result
+        # Сохраняем результат в Redis для этой сессии
+        if "forecast" in result and result.get("status") != "error":
+            session_manager.set_forecast(session_id, result)
+            logger.debug(f"💾 Прогноз сохранён для сессии {session_id[:8]}")
 
         return result
 
     except Exception as e:
-        logger.error(f"Forecast failed: {e}")
+        logger.error(f"Forecast failed: {e}", exc_info=True)
         return {
             "error": f"Ошибка при построении прогноза: {str(e)}",
             "status": "error"
@@ -90,17 +125,26 @@ def build_forecast(
 
 
 @tool
-def get_forecast_summary() -> dict:
+def get_forecast_summary(session_id: Optional[str] = None) -> dict:
     """
     Получить краткое резюме последнего построенного прогноза.
+
+    Args:
+        session_id: ID сессии (опционально)
 
     Returns:
         Словарь с ключевыми метриками прогноза
     """
-    from agent.state import get_global_state
 
-    state = get_global_state()
-    forecast = state.get("last_forecast")
+    # Получаем менеджер сессий
+    session_manager = get_session_manager()
+
+    # Если session_id не передан — используем дефолт
+    if session_id is None:
+        session_id = "default"
+
+    # Получаем прогноз из Redis для этой сессии
+    forecast = session_manager.get_forecast(session_id)
 
     if not forecast or "forecast" not in forecast:
         return {"status": "no_forecast", "message": "Прогноз ещё не построен"}

@@ -1,70 +1,171 @@
-"""
-Глобальное состояние агента.
-Для прототипа — один датасет на всё приложение.
-"""
+"""Управление сессиями через Redis."""
+import json
 import logging
-from typing import Optional, Dict, Any
+import uuid
+from typing import Dict, List, Any, Optional
 import pandas as pd
+import redis
 
 logger = logging.getLogger(__name__)
 
-# Глобальное состояние (одно на всё приложение)
-_global_state: Dict[str, Any] = {
-    "dataset": None,
-    "dataset_info": {},
-    "last_forecast": None,
-    "preferences": {},
-}
+class SessionManager:
+    """Менеджер сессий с хранением в Redis."""
+
+    def __init__(self, host: str = None, port: int = None):
+        self.host = host or "localhost"
+        self.port = int(port or 6379)
+
+        try:
+            self.redis_client = redis.Redis(
+                host=self.host,
+                port=self.port,
+                db=0,
+                decode_responses=True,
+                socket_timeout=5,
+                socket_connect_timeout=5
+            )
+            self.redis_client.ping()
+            logger.info(f"✅ Подключено к Redis на {self.host}:{self.port}")
+        except redis.ConnectionError:
+            logger.critical(f"❌ Не удалось подключиться к Redis")
+            self.redis_client = None
+            self.in_memory_store = {}
+            logger.warning("⚠️ Используем in-memory storage вместо Redis")
+
+    DATASET_KEY = "dataset:"
+    HISTORY_KEY = "history:"
+    INFO_KEY = "info:"
+    FORECAST_KEY = "forecast:"
+    BACKTEST_KEY = "backtest:"
+
+    @classmethod
+    def generate_session_id(cls) -> str:
+        """Генерирует уникальный ID сессии."""
+        return str(uuid.uuid4())
+
+    def save_dataset(self, session_id: str, df: pd.DataFrame) -> Dict[str, Any]:
+        """Сохраняет датасет для конкретной сессии."""
+        from utils import find_columns
+
+        key = f"{self.DATASET_KEY}{session_id}"
+        info_key = f"{self.INFO_KEY}{session_id}"
+
+        if self.redis_client:
+            df_csv = df.to_csv(index=False)
+            self.redis_client.set(key, df_csv)
+
+            date_col, sales_col, store_col = find_columns(df)
+            info = {
+                "rows": len(df),
+                "columns": list(df.columns),
+                "date_column": date_col,
+                "sales_column": sales_col,
+                "store_column": store_col,
+            }
+
+            if date_col and pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                info["date_range"] = {
+                    "start": str(df[date_col].min()),
+                    "end": str(df[date_col].max())
+                }
+
+            if store_col:
+                info["stores_count"] = df[store_col].nunique()
+
+            self.redis_client.set(info_key, json.dumps(info))
+        else:
+            self.in_memory_store[key] = df.to_csv(index=False)
+            self.in_memory_store[info_key] = json.dumps({
+                "rows": len(df),
+                "columns": list(df.columns)
+            })
+
+        logger.debug(f"💾 Датасет сохранён для сессии {session_id[:8]}...")
+        return info
+
+    def get_dataset(self, session_id: str) -> Optional[pd.DataFrame]:
+        """Загружает датасет для конкретной сессии."""
+        key = f"{self.DATASET_KEY}{session_id}"
+
+        if self.redis_client:
+            csv_str = self.redis_client.get(key)
+            if csv_str:
+                import io
+                return pd.read_csv(io.StringIO(csv_str))
+        else:
+            csv_str = self.in_memory_store.get(key)
+            if csv_str:
+                import io
+                return pd.read_csv(io.StringIO(csv_str))
+
+        logger.debug(f"📂 Нет датасета для сессии {session_id[:8]}")
+        return None
+
+    def add_message(self, session_id: str, role: str, content: str):
+        """Добавляет сообщение в историю сессии."""
+        history_key = f"{self.HISTORY_KEY}{session_id}"
+        message = {"role": role, "content": content}
+
+        if self.redis_client:
+            self.redis_client.rpush(history_key, json.dumps(message))
+            self.redis_client.ltrim(history_key, 0, 99)
+        else:
+            if history_key not in self.in_memory_store:
+                self.in_memory_store[history_key] = []
+            self.in_memory_store[history_key].append(json.dumps(message))
+            self.in_memory_store[history_key] = self.in_memory_store[history_key][-100:]
+
+    def get_history(self, session_id: str, limit: int = 50) -> List[Dict[str, str]]:
+        """Получает историю сессии."""
+        history_key = f"{self.HISTORY_KEY}{session_id}"
+
+        if self.redis_client:
+            messages_json = self.redis_client.lrange(history_key, 0, limit - 1)
+            return [json.loads(m) for m in messages_json]
+        else:
+            messages_json = self.in_memory_store.get(history_key, [])
+            return [json.loads(m) for m in reversed(messages_json[-limit:])]
+
+    def set_forecast(self, session_id: str, forecast_data: Dict[str, Any]):
+        """Сохраняет результат прогноза."""
+        key = f"{self.FORECAST_KEY}{session_id}"
+
+        if self.redis_client:
+            self.redis_client.set(key, json.dumps(forecast_data))
+        else:
+            self.in_memory_store[key] = json.dumps(forecast_data)
+
+    def get_forecast(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Получает результат последнего прогноза."""
+        key = f"{self.FORECAST_KEY}{session_id}"
+
+        if self.redis_client:
+            result = self.redis_client.get(key)
+            return json.loads(result) if result else None
+        else:
+            result = self.in_memory_store.get(key)
+            return json.loads(result) if result else None
+
+    def clear_session(self, session_id: str):
+        """Очищает все данные сессии."""
+        prefix_keys = [self.DATASET_KEY, self.HISTORY_KEY, self.INFO_KEY,
+                       self.FORECAST_KEY, self.BACKTEST_KEY]
+        keys_to_delete = [f"{prefix}{session_id}" for prefix in prefix_keys]
+
+        if self.redis_client:
+            self.redis_client.delete(*keys_to_delete)
+        else:
+            for key in keys_to_delete:
+                self.in_memory_store.pop(key, None)
+
+        logger.info(f"🗑 Очистка сессии {session_id[:8]}")
 
 
-def get_global_state() -> Dict[str, Any]:
-    """Получить глобальное состояние."""
-    return _global_state
+_manager: Optional[SessionManager] = None
 
-
-def set_current_dataset(df: pd.DataFrame) -> Dict[str, Any]:
-    """Сохранить датасет в глобальное состояние."""
-    from utils import find_columns
-
-    _global_state["dataset"] = df
-
-    date_col, sales_col, store_col = find_columns(df)
-
-    info = {
-        "rows": len(df),
-        "columns": list(df.columns),
-        "date_column": date_col,
-        "sales_column": sales_col,
-        "store_column": store_col,
-        "date_range": None,
-        "stores_count": None,
-    }
-
-    if date_col and pd.api.types.is_datetime64_any_dtype(df[date_col]):
-        info["date_range"] = {
-            "start": str(df[date_col].min()),
-            "end": str(df[date_col].max())
-        }
-    if store_col:
-        info["stores_count"] = df[store_col].nunique()
-
-    _global_state["dataset_info"] = info
-    logger.info(f"💾 Dataset saved: {info['rows']} rows")
-    return info
-
-
-def get_current_dataset() -> Optional[pd.DataFrame]:
-    """Получить текущий датасет."""
-    return _global_state.get("dataset")
-
-
-def clear_state():
-    """Очистить глобальное состояние."""
-    global _global_state
-    _global_state = {
-        "dataset": None,
-        "dataset_info": {},
-        "last_forecast": None,
-        "preferences": {},
-    }
-    logger.info("🧹 Global state cleared")
+def get_session_manager() -> SessionManager:
+    """Получить глобальный экземпляр менеджера сессий."""
+    global _manager
+    if _manager is None:
+        _manager = SessionManager()
+    return _manager

@@ -1,38 +1,25 @@
-"""
-Главный модуль FastAPI.
-
-Предоставляет REST API для взаимодействия с агентом.
-Вся бизнес-логика вынесена в модуль agent.
-"""
-
+"""Главный модуль FastAPI."""
 import logging
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from agent.smol_agent import SmolSalesAgent
+from agent.state import get_session_manager
 from config import AppSettings
-from agent.agent import SmolSalesAgent
 
-# Загружаем конфигурацию
-settings = AppSettings()
-settings.validate()
-
-# Настройка логирования
-logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format=settings.LOG_FORMAT
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация приложения
+settings = AppSettings()
+
 app = FastAPI(
     title=settings.API_TITLE,
     description=settings.API_DESCRIPTION,
     version=settings.API_VERSION
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -41,92 +28,57 @@ app.add_middleware(
     allow_headers=settings.CORS_ALLOW_HEADERS,
 )
 
-
-
-def _get_or_create_agent() -> SmolSalesAgent:
-    """
-    Получить новый экземпляр агента.
-
-    Returns:
-        Экземпляр SmolSalesAgent
-    """
-    return SmolSalesAgent(model_provider=settings.LLM_PROVIDER)
-
-
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {
-        "service": "Sales Forecasting Agent API",
-        "version": "3.0",
+        "service": settings.API_TITLE,
+        "version": settings.API_VERSION,
         "status": "running"
     }
-
-
-@app.post("/chat")
-async def chat(
-        query: str = Form(...),
-):
-    """
-    Отправить запрос агенту и получить ответ.
-    
-    Поддерживает session_id через Form-параметр или заголовок.
-    """
-
-    try:
-        agent = _get_or_create_agent()
-        result = await agent.run_async(query)
-        return result
-
-    except Exception as e:
-        logger.error(f"Chat endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/upload")
 async def upload_dataset(
         file: UploadFile = File(...),
         session_id: Optional[str] = Header(None, alias="X-Session-ID")
 ):
-    """
-    Загрузить CSV-файл с данными о продажах.
-    
-    Файл автоматически обрабатывается инструментом load_dataset.
-    """
+    """Загрузить CSV-файл."""
+    if not session_id:
+        session_id = get_session_manager().generate_session_id()
+        logger.info(f"🆕 Новая сессия создана: {session_id}")
 
     try:
-        # Читаем содержимое файла
         content = await file.read()
         csv_text = content.decode("utf-8", errors="ignore")
 
-        # Вызываем инструмент напрямую (без LLM)
         from agent.tools.data import load_dataset
         result = load_dataset(
-            csv_content=csv_text
+            csv_content=csv_text,
+            session_id=session_id
         )
 
-        return {
-            **result
-        }
-
+        result["session_id"] = session_id
+        return result
     except Exception as e:
-        logger.error(f"Upload error: {e}")
+        logger.error(f"Ошибка загрузки: {e}")
         raise HTTPException(status_code=400, detail=f"Ошибка загрузки: {str(e)}")
 
+@app.post("/chat")
+async def chat_endpoint(
+        query: str = Form(...),
+        session_id: Optional[str] = Header(None, alias="X-Session-ID")
+):
+    """Обработать запрос пользователя."""
+    if not session_id:
+        session_id = get_session_manager().generate_session_id()
+        logger.info(f"🆕 Новая сессия для чата: {session_id}")
 
-# ============================================================================
-# ENTRY POINT
-# ============================================================================
-
-if __name__ == "__main__":
-    import uvicorn
-
-    logger.info(f"🚀 Запуск Sales Forecasting Agent API на {settings.HOST}:{settings.PORT}")
-    logger.info(f"📚 Docs: http://localhost:{settings.PORT}/docs")
-
-    uvicorn.run(
-        "main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=True
-    )
+    try:
+        agent = SmolSalesAgent(model_provider=settings.LLM_PROVIDER, session_id=session_id)
+        query = f"Пожалуйста, ответь на русском: {query}"
+        result = await agent.run_async(query)
+        result["session_id"] = session_id
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка чата: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -7,8 +7,8 @@
 import logging
 from typing import Optional
 
-from config import AppSettings
 from agent.models.yandex import YandexGPTModel
+from config import AppSettings
 
 logger = logging.getLogger(__name__)
 settings = AppSettings()

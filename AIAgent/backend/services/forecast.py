@@ -16,7 +16,8 @@ from __future__ import annotations
 from typing import List, Optional, Dict, Any
 import pandas as pd
 
-from models import neuralprophet_forecast, sarima_forecast, backtest_models
+from agent.tools.backtest import backtest_models
+from models import neuralprophet_forecast, sarima_forecast
 from utils import find_columns
 
 

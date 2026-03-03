@@ -8,7 +8,8 @@
 import pandas as pd
 import numpy as np
 from neuralprophet import NeuralProphet
-from utils import find_columns, calc_mae_mape
+
+from utils import find_columns
 
 
 def neuralprophet_forecast(

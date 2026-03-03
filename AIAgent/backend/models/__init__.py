@@ -7,11 +7,9 @@
 
 from .neuralprophet_model import neuralprophet_forecast
 from .sarima_model import sarima_forecast
-from .backtest import backtest_models
 
 __all__ = [
     "neuralprophet_forecast",
     "sarima_forecast",
-    "backtest_models",
 ]
 
