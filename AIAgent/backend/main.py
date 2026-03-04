@@ -51,7 +51,7 @@ async def upload_dataset(
         content = await file.read()
         csv_text = content.decode("utf-8", errors="ignore")
 
-        from agent.tools.data import load_dataset
+        from agent.tools.data.data_tools import load_dataset
         result = load_dataset(
             csv_content=csv_text,
             session_id=session_id

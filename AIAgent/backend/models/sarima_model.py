@@ -11,7 +11,6 @@ import importlib
 
 from utils import find_columns
 
-
 def sarima_forecast(
     df: pd.DataFrame,
     periods: int = 30,
@@ -46,7 +45,6 @@ def sarima_forecast(
     try:
         SARIMAX = importlib.import_module("statsmodels.tsa.statespace.sarimax").SARIMAX
 
-        forecast_list = []
         info = {
             "date_column": date_col,
             "sales_column": sales_col,
@@ -183,7 +181,7 @@ def _fit_and_forecast_store(daily, store_id, periods, SARIMAX):
         enforce_invertibility=False,
     )
     fitted = model.fit(disp=False)
-    fc_res = fitted.get_forecast(steps=periods)
+    fc_res = fitted.get_forecast_by_session(steps=periods)
     fc_values = fc_res.predicted_mean
     conf_int = fc_res.conf_int(alpha=0.1)
 
@@ -243,7 +241,7 @@ def _fit_and_forecast_general(daily, periods, SARIMAX):
         enforce_invertibility=False,
     )
     fitted = model.fit(disp=False)
-    fc_res = fitted.get_forecast(steps=periods)
+    fc_res = fitted.get_forecast_by_session(steps=periods)
     fc_values = fc_res.predicted_mean
     conf_int = fc_res.conf_int(alpha=0.1)
 

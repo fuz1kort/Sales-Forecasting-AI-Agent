@@ -35,7 +35,7 @@ def render_upload_section(api_client):
 
         col1, col2 = st.columns([2, 1])
         with col1:
-            if st.button("🚀 Загрузить в агент", type="primary"):
+            if st.button("🚀 Загрузить в агента", type="primary"):
                 with st.spinner("⏳ Загружаю данные в агент..."):
                     result, session_id = api_client.upload_file(preview_data, preview_filename)
 

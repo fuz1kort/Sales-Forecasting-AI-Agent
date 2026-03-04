@@ -2,22 +2,13 @@
 import logging
 from typing import Optional, Dict, Any, List
 
-from smolagents import CodeAgent, ToolCallingAgent, PromptTemplates
+from smolagents import CodeAgent, ToolCallingAgent
 
 from agent.memory import SalesAgentMemory
 from agent.models.yandex import YandexGPTModel
-from agent.tools.analyze import (
-    analyze_top_products_tool,
-    analyze_trends_tool,
-    analyze_kpi_tool,
-    analyze_seasonality_tool,
-    analyze_general_tool,
-)
-from agent.tools.backtest import run_backtest_tool
-from agent.tools.data import load_dataset, get_dataset_info
-from agent.tools.forecast import build_forecast, get_forecast_summary
-from config import AppSettings
+from agent.tools import load_dataset, get_dataset_info, build_forecast,get_forecast_summary,run_backtest,analyze_top_products,analyze_trends,analyze_kpi,analyze_seasonality,analyze_general
 
+from config import AppSettings
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +39,50 @@ DEFAULT_SYSTEM_PROMPT = """
 🎯 analyze_kpi_tool() — KPI
 🌟 analyze_seasonality_tool() — сезонность
 ℹ️ analyze_general_tool() — общие выводы
+
+
+⚠️ КРИТИЧЕСКИ ВАЖНО — РАБОТА С ПРОГНОЗАМИ:
+
+1️⃣ ПРОВЕРЬ КЭШ ПЕРЕД ВЫЧИСЛЕНИЯМИ:
+   Сначала вызови get_forecast_summary(session_id=session_id)
+   → Если там есть данные, НЕ вызывай build_forecast!
+   → Это экономит 60-90 секунд
+
+2️⃣ НЕ ИСПОЛЬЗУЙ model_type="auto":
+   → По умолчанию: model_type="neuralprophet" (15-30 сек)
+   → "auto" запускает backtest и работает в 3 раза дольше
+   → Используй "auto" ТОЛЬКО через run_backtest() по явному запросу
+
+3️⃣ ОДИН ПРОГНОЗ НА СЕССИЮ:
+   → Не строй прогноз для 1 дня и отдельно для 7 дней
+   → Построй один прогноз на 7 дней, возьми первый день из него
+   → Каждый build_forecast = новое обучение модели!
+
+4️⃣ ОДИН final_answer():
+   → Вызывай final_answer() ТОЛЬКО ОДИН РАЗ в конце
+   → Не вызывай его после каждого шага
+
+✅ ПРАВИЛЬНЫЙ ПРИМЕР:
+Thought: Пользователь просит прогноз на завтра и на неделю.
+<code>
+# Сначала проверим кэш
+summary = get_forecast_summary(session_id=session_id)
+
+# Если кэш пустой — строим прогноз один раз на 7 дней
+if summary.get("status") == "no_forecast":
+    forecast = build_forecast(periods=7, model_type="neuralprophet", session_id=session_id)
+    summary = get_forecast_summary(session_id=session_id)
+
+# Формируем ответ из одного прогноза
+tomorrow = summary["average_daily"]  # Среднее за период
+week = summary["total_forecast"]
+final_answer(f"Прогноз на завтра: ~${tomorrow:,.2f}. На неделю: ${week:,.2f}")
+</code>
+
+❌ НЕПРАВИЛЬНО:
+- build_forecast(periods=1) + build_forecast(periods=7) ← два обучения!
+- model_type="auto" ← долго!
+- final_answer() вызван дважды ← ошибка!
 """
 
 class SmolSalesAgent:
@@ -72,12 +107,12 @@ class SmolSalesAgent:
             get_dataset_info,
             build_forecast,
             get_forecast_summary,
-            run_backtest_tool,
-            analyze_top_products_tool,
-            analyze_trends_tool,
-            analyze_kpi_tool,
-            analyze_seasonality_tool,
-            analyze_general_tool,
+            run_backtest,
+            analyze_top_products,
+            analyze_trends,
+            analyze_kpi,
+            analyze_seasonality,
+            analyze_general,
         ]
 
         AgentClass = CodeAgent if use_code_agent else ToolCallingAgent

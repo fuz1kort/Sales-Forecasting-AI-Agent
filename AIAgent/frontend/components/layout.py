@@ -7,12 +7,8 @@ from datetime import datetime
 
 def render_header():
     """Заголовок приложения."""
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.title("📊 Sales Forecasting Agent")
-        st.caption("Интеллектуальный агент для анализа продаж")
-    with col2:
-        st.metric("✅ Статус", "Онлайн", delta=None)
+    st.title("📊 Sales Forecasting Agent")
+    st.caption("Интеллектуальный агент для анализа продаж")
 
 
 def render_footer():

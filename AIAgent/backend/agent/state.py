@@ -135,7 +135,7 @@ class SessionManager:
         else:
             self.in_memory_store[key] = json.dumps(forecast_data)
 
-    def get_forecast(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_forecast_by_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Получает результат последнего прогноза."""
         key = f"{self.FORECAST_KEY}{session_id}"
 

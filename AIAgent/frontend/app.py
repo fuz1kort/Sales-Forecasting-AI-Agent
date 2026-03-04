@@ -41,16 +41,12 @@ def main():
     st.divider()
 
     # Секция загрузки
-    uploaded_data = render_upload_section(api_client)
+    render_upload_section(api_client)
 
     # Если есть данные — показываем остальное
     if st.session_state.dataset_info:
         render_metrics_panel(st.session_state.dataset_info)
         st.divider()
-
-        # Можно добавить дополнительные секции
-        # render_forecast_section(api_client)
-        # render_chat_section(api_client)
 
         st.divider()
 
