@@ -18,3 +18,4 @@ smolagents[litellm]
 accelerate
 redis
 datasets
+uuid

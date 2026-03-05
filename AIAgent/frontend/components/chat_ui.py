@@ -1,13 +1,20 @@
 """Интерфейс чата с агентом."""
+from datetime import datetime
 
+import pandas as pd
 import streamlit as st
+import json
+from matplotlib import pyplot as plt
 
 
 def render_chat_section(api_client):
-    """Рендер секции чата."""
+    """Рендер секции чата с блокировкой во время запроса."""
     st.header("💬 Чат с аналитиком")
 
-    # Отображение истории
+    # Флаг блокировки
+    if "loading" not in st.session_state:
+        st.session_state.loading = False
+
     chat_container = st.container()
 
     with chat_container:
@@ -18,50 +25,64 @@ def render_chat_section(api_client):
                 with st.chat_message(msg["role"]):
                     render_agent_response(msg["content"], msg.get("is_code", False))
 
-    # Поле ввода
-    prompt = st.chat_input("Спросите о продажах, прогнозе или данных...", key="chat_input")
+    # Блокируем поле ввода если идет запрос
+    if st.session_state.loading:
+        st.chat_input("⏳ Подождите, агент обрабатывает запрос...", disabled=True)
+        return
+
+    prompt = st.chat_input("Спросите о продажах, прогнозе или данных...")
 
     if prompt:
+        # Устанавливаем блокировку
+        st.session_state.loading = True
+
         # Добавляем сообщение пользователя
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
-        # Отображаем вопрос
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Отправляем запрос
+        try:
+            with st.spinner("🤖 Агент анализирует данные..."):
+                response = api_client.send_query(prompt)
 
-        # Отправляем запрос и ждём ответ
-        with st.spinner("🤖 Агент анализирует данные..."):
-            response = api_client.send_query(prompt)
+                if response.get("status") == "success":
+                    answer = response.get("answer", "")
 
-            if response.get("status") == "success":
-                answer = response.get("answer", "")
+                    with st.chat_message("assistant"):
+                        render_agent_response(answer)
 
-                # Отображаем ответ
-                with st.chat_message("assistant"):
-                    render_agent_response(answer)
-
-                # Сохраняем в историю
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": answer,
-                    "is_code": "<code>" in answer
-                })
-            else:
-                error_msg = response.get("error", "Неизвестная ошибка")
-                st.error(f"❌ Ошибка: {error_msg}")
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": f"⚠️ Не удалось обработать запрос: {error_msg}",
-                    "is_code": False
-                })
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "is_code": "<code>" in answer
+                    })
+                else:
+                    error_msg = response.get("error", "Неизвестная ошибка")
+                    st.error(f"❌ Ошибка: {error_msg}")
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": f"⚠️ Не удалось обработать запрос: {error_msg}",
+                        "is_code": False
+                    })
+        finally:
+            # Снимаем блокировку
+            st.session_state.loading = False
 
 
 def render_agent_response(text: str, is_code: bool = False):
-    """Форматирует ответ агента для отображения."""
+    """Форматирует ответ агента для отображения и строит график/таблицу, если это прогноз."""
     if not text:
         return
 
-    # Замена маркдаун тегов на безопасные
+    # Попробуем распарсить прогноз
+    forecast_result = try_parse_forecast(text)
+    if forecast_result:
+        st.subheader("📊 Таблица прогноза")
+        render_forecast_table(forecast_result)
+        st.subheader("📈 График прогноза")
+        plot_forecast(forecast_result)
+        return
+
+    # Иначе это обычный текст/markdown
     safe_text = format_markdown_safe(text)
 
     # Если есть блок кода <code>...</code> — обрабатываем отдельно
@@ -70,6 +91,54 @@ def render_agent_response(text: str, is_code: bool = False):
 
     st.markdown(safe_text)
 
+def render_forecast_table(forecast_result):
+    if forecast_result["status"] != "success" or not forecast_result.get("forecast"):
+        st.info("Нет данных для прогноза")
+        return
+
+    table = pd.DataFrame(forecast_result["forecast"])
+    table["date"] = pd.to_datetime(table["date"])
+    st.table(table)
+
+def try_parse_forecast(text: str) -> dict | None:
+    """Пробуем распознать JSON-строку с прогнозом."""
+    if isinstance(text, dict) and "forecast" in text:
+        return text
+
+    try:
+        # Иногда агент возвращает JSON в виде строки
+        parsed = json.loads(text)
+        if "forecast" in parsed:
+            return parsed
+    except Exception:
+        return None
+
+    return None
+
+
+def plot_forecast(forecast_result, n_days: int = 30):
+    """Построение графика прогноза."""
+    forecast_data = forecast_result.get("forecast", [])[:n_days]
+    if not forecast_data:
+        st.info("Нет данных для построения графика")
+        return
+
+    dates = [datetime.strptime(day["date"], "%Y-%m-%d") for day in forecast_data]
+    values = [day["forecast"] for day in forecast_data]
+    lower = [day.get("lower_bound", v) for v, day in zip(values, forecast_data)]
+    upper = [day.get("upper_bound", v) for v, day in zip(values, forecast_data)]
+
+    plt.figure(figsize=(10,5))
+    plt.plot(dates, values, label="Прогноз", color="blue", marker="o")
+    plt.fill_between(dates, lower, upper, color="lightblue", alpha=0.4, label="Доверительный интервал")
+    plt.title("Прогноз продаж")
+    plt.xlabel("Дата")
+    plt.ylabel("Продажи")
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    st.pyplot(plt.gcf())
 
 def format_markdown_safe(text: str) -> str:
     """Безопасно форматирует Markdown текст."""

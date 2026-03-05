@@ -28,6 +28,7 @@ app.add_middleware(
     allow_headers=settings.CORS_ALLOW_HEADERS,
 )
 
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
@@ -36,6 +37,7 @@ async def root():
         "version": settings.API_VERSION,
         "status": "running"
     }
+
 
 @app.post("/upload")
 async def upload_dataset(
@@ -63,6 +65,7 @@ async def upload_dataset(
         logger.error(f"Ошибка загрузки: {e}")
         raise HTTPException(status_code=400, detail=f"Ошибка загрузки: {str(e)}")
 
+
 @app.post("/chat")
 async def chat_endpoint(
         query: str = Form(...),
@@ -74,7 +77,7 @@ async def chat_endpoint(
         logger.info(f"🆕 Новая сессия для чата: {session_id}")
 
     try:
-        agent = SmolSalesAgent(model_provider=settings.LLM_PROVIDER, session_id=session_id)
+        agent = SmolSalesAgent(model_provider=settings.LLM_PROVIDER, use_code_agent=True, session_id=session_id)
         query = f"Пожалуйста, ответь на русском: {query}"
         result = await agent.run_async(query)
         result["session_id"] = session_id
