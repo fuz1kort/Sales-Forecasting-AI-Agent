@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import importlib
 
-from utils import find_columns
+from backend.utils import find_columns
 
 def sarima_forecast(
     df: pd.DataFrame,
@@ -29,9 +29,15 @@ def sarima_forecast(
     Returns:
         Словарь с прогнозом, метриками и информацией о модели
     """
-    date_col, sales_col, store_col = find_columns(df)
+    date_col, sales_col, store_col, product_col = find_columns(df)
     if not sales_col:
         return {"error": f"Не найден столбец продаж. Доступные столбцы: {df.columns.tolist()}"}
+
+    # Фильтрация по магазинам
+    if forecast_type == "by_store" and store_ids and store_col:
+        df = df[df[store_col].isin(store_ids)].copy()
+        if df.empty:
+            return {"error": f"Нет данных для магазинов {store_ids}"}
 
     # Подготовка даты
     if not date_col:

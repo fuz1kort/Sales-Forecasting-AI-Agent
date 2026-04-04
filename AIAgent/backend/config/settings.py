@@ -25,11 +25,12 @@ class AppSettings:
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    SESSION_TTL_SECONDS: int = int(os.getenv("SESSION_TTL_SECONDS", "86400"))  # 24 часа
 
     # Модели прогнозирования
     DEFAULT_FORECAST_PERIODS: int = 30
     MAX_BACKTEST_DAYS: int = 365
-    DEFAULT_MODEL: str = "neuralprophet"
+    DEFAULT_MODEL: str = "sarima"
 
     # CORS
     CORS_ORIGINS: list = ["*"]
@@ -45,6 +46,7 @@ class AppSettings:
     UPLOAD_TIMEOUT: int = int(os.getenv("UPLOAD_TIMEOUT", "60"))
     CHAT_TIMEOUT: int = int(os.getenv("CHAT_TIMEOUT", "120"))
     FORECAST_TIMEOUT: int = int(os.getenv("FORECAST_TIMEOUT", "180"))
+    YANDEX_REQUEST_TIMEOUT: int = int(os.getenv("YANDEX_REQUEST_TIMEOUT", "120"))
 
     # Пределы
     MAX_CSV_SIZE_MB: int = 100

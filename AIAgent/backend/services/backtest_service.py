@@ -12,8 +12,10 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-from utils import find_columns
-from models import neuralprophet_forecast, sarima_forecast
+from backend.utils import find_columns
+from backend.models import sarima_forecast
+from backend.models.prophet_model import prophet_forecast
+from backend.models.catboost_model import ensemble_forecast_optimized
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,7 @@ def backtest_models(
     """
     # Авто-поиск колонок
     if not date_col or not sales_col:
-        date_col, sales_col, _ = find_columns(df)
+        date_col, sales_col, _, _ = find_columns(df)
 
     if not date_col or not sales_col:
         return {"error": "Не найдены колонки даты или продаж", "status": "error"}
@@ -69,19 +71,11 @@ def backtest_models(
         "predictions": {
             "date": test_df[date_col].dt.strftime("%Y-%m-%d").tolist(),
             "actual": test_df[sales_col].tolist(),
-            "neuralprophet": [],
             "sarima": [],
+            "prophet": [],
+            "ensemble": [],
         }
     }
-
-    # Тестируем NeuralProphet
-    np_result = _test_model(
-        "neuralprophet", neuralprophet_forecast,
-        train_df, test_df, sales_col, test_days
-    )
-    results["metrics"]["neuralprophet"] = np_result
-    if "error" not in np_result:
-        results["predictions"]["neuralprophet"] = np_result.get("predicted", [])
 
     # Тестируем SARIMA
     sarima_result = _test_model(
@@ -91,6 +85,24 @@ def backtest_models(
     results["metrics"]["sarima"] = sarima_result
     if "error" not in sarima_result:
         results["predictions"]["sarima"] = sarima_result.get("predicted", [])
+
+    # Тестируем Prophet
+    prophet_result = _test_model(
+        "prophet", prophet_forecast,
+        train_df, test_df, sales_col, test_days
+    )
+    results["metrics"]["prophet"] = prophet_result
+    if "error" not in prophet_result:
+        results["predictions"]["prophet"] = prophet_result.get("predicted", [])
+
+    # Тестируем Ensemble
+    ensemble_result = _test_model(
+        "ensemble", ensemble_forecast_optimized,
+        train_df, test_df, sales_col, test_days
+    )
+    results["metrics"]["ensemble"] = ensemble_result
+    if "error" not in ensemble_result:
+        results["predictions"]["ensemble"] = ensemble_result.get("predicted", [])
 
     # Выбираем лучшую модель
     results["best_model"] = _select_best_by_mape(results["metrics"])
@@ -151,10 +163,14 @@ def _calc_metrics(actual: np.ndarray, predicted: list) -> dict:
 
 def _select_best_by_mape(metrics: dict) -> str:
     """Выбирает модель с минимальным MAPE."""
-    np_mape = metrics.get("neuralprophet", {}).get("mape", float("inf"))
-    sarima_mape = metrics.get("sarima", {}).get("mape", float("inf"))
+    models = ["sarima", "prophet", "ensemble"]
+    best_model = "sarima"  # fallback
+    best_mape = float("inf")
 
-    if np_mape == float("inf") and sarima_mape == float("inf"):
-        return "neuralprophet"  # fallback
+    for model in models:
+        mape = metrics.get(model, {}).get("mape", float("inf"))
+        if mape < best_mape:
+            best_mape = mape
+            best_model = model
 
-    return "neuralprophet" if np_mape <= sarima_mape else "sarima"
+    return best_model

@@ -9,11 +9,19 @@ from components.upload_ui import render_upload_section
 # Импорт компонентов
 from utils.api_client import APIClient
 
+
+def _dedupe_history(history: list[dict]) -> list[dict]:
+    cleaned = []
+    for item in history:
+        if not cleaned or cleaned[-1].get("role") != item.get("role") or cleaned[-1].get("content") != item.get("content"):
+            cleaned.append(item)
+    return cleaned
+
 # TODO переработать UI
 def main():
     """Запуск приложения."""
     st.set_page_config(
-        page_title="📊 Sales Forecasting Agent",
+        page_title="Sales Forecasting Agent",
         page_icon="📈",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -35,9 +43,22 @@ def main():
     if st.session_state.session_id:
         api_client.session_id = st.session_state.session_id
 
+        # Попробуем восстановить данные из существующей сессии
+        if not st.session_state.dataset_info:
+            session_info = api_client.get_session_info()
+            if session_info.get("status") == "success":
+                st.session_state.dataset_info = session_info
+
+        # Восстанавливаем историю чата, если она есть
+        if not st.session_state.chat_history:
+            history_result = api_client.get_session_history()
+            if history_result.get("status") == "success" and isinstance(history_result.get("history"), list):
+                st.session_state.chat_history = _dedupe_history(history_result.get("history"))
+
     # Рендерим основной интерфейс
     render_header()
     render_sidebar(st.session_state.session_id)
+
     st.divider()
 
     # Секция загрузки

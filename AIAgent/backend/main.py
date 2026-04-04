@@ -1,13 +1,20 @@
 """Главный модуль FastAPI."""
 import logging
+import sys
+import os
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
+# Add the project root to Python path for imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent.smol_agent import SmolSalesAgent
-from agent.state import get_session_manager
-from config import AppSettings
+from backend.agent.smol_agent import SmolSalesAgent
+from backend.agent.state import get_session_manager
+from backend.agent.tools import get_dataset_info
+from backend.config import AppSettings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,7 +60,7 @@ async def upload_dataset(
         content = await file.read()
         csv_text = content.decode("utf-8", errors="ignore")
 
-        from agent.tools.data.data_tools import load_dataset
+        from backend.agent.tools import load_dataset
         result = load_dataset(
             csv_content=csv_text,
             session_id=session_id
@@ -85,3 +92,53 @@ async def chat_endpoint(
     except Exception as e:
         logger.error(f"Ошибка чата: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/session_info")
+async def session_info(
+        session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+        session_id_query: Optional[str] = Query(None, alias="session_id")
+):
+    """Получить информацию о сессии и загруженном датасете."""
+    if not session_id:
+        session_id = session_id_query
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id не указан")
+
+    try:
+        result = get_dataset_info(session_id=session_id)
+        result["session_id"] = session_id
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка получения информации о сессии: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/session_history")
+async def session_history(
+        session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+        session_id_query: Optional[str] = Query(None, alias="session_id")
+):
+    """Получить историю чата для существующей сессии."""
+    if not session_id:
+        session_id = session_id_query
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id не указан")
+
+    try:
+        history = get_session_manager().get_history(session_id)
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "history": history
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения истории сессии: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

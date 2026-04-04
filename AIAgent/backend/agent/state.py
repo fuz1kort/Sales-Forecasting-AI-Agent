@@ -6,14 +6,18 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import redis
 
+from backend.config import AppSettings
+
 logger = logging.getLogger(__name__)
 
 class SessionManager:
     """Менеджер сессий с хранением в Redis."""
 
     def __init__(self, host: str = None, port: int = None):
-        self.host = host or "localhost"
-        self.port = int(port or 6379)
+        settings = AppSettings()
+        self.host = host or settings.REDIS_HOST
+        self.port = int(port or settings.REDIS_PORT)
+        self.ttl = settings.SESSION_TTL_SECONDS
 
         try:
             self.redis_client = redis.Redis(
@@ -21,11 +25,12 @@ class SessionManager:
                 port=self.port,
                 db=0,
                 decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5
+                socket_timeout=1,
+                socket_connect_timeout=1,
+                health_check_interval=0
             )
             self.redis_client.ping()
-            logger.info(f"✅ Подключено к Redis на {self.host}:{self.port}")
+            logger.info(f"✅ Подключено к Redis на {self.host}:{self.port} (TTL: {self.ttl}s)")
         except redis.ConnectionError:
             logger.critical(f"❌ Не удалось подключиться к Redis")
             self.redis_client = None
@@ -45,16 +50,16 @@ class SessionManager:
 
     def save_dataset(self, session_id: str, df: pd.DataFrame) -> Dict[str, Any]:
         """Сохраняет датасет для конкретной сессии."""
-        from utils import find_columns
+        from backend.utils import find_columns
 
         key = f"{self.DATASET_KEY}{session_id}"
         info_key = f"{self.INFO_KEY}{session_id}"
 
         if self.redis_client:
             df_csv = df.to_csv(index=False)
-            self.redis_client.set(key, df_csv)
+            self.redis_client.set(key, df_csv, ex=self.ttl)
 
-            date_col, sales_col, store_col = find_columns(df)
+            date_col, sales_col, store_col, product_col = find_columns(df)
             info = {
                 "rows": len(df),
                 "columns": list(df.columns),
@@ -72,7 +77,7 @@ class SessionManager:
             if store_col:
                 info["stores_count"] = df[store_col].nunique()
 
-            self.redis_client.set(info_key, json.dumps(info))
+            self.redis_client.set(info_key, json.dumps(info), ex=self.ttl)
         else:
             self.in_memory_store[key] = df.to_csv(index=False)
             self.in_memory_store[info_key] = json.dumps({
@@ -91,15 +96,39 @@ class SessionManager:
             csv_str = self.redis_client.get(key)
             if csv_str:
                 import io
-                return pd.read_csv(io.StringIO(csv_str))
+                df = pd.read_csv(io.StringIO(csv_str))
+                # Конвертируем дату обратно в datetime
+                self._convert_date_column(df)
+                return df
         else:
             csv_str = self.in_memory_store.get(key)
             if csv_str:
                 import io
-                return pd.read_csv(io.StringIO(csv_str))
+                df = pd.read_csv(io.StringIO(csv_str))
+                # Конвертируем дату обратно в datetime
+                self._convert_date_column(df)
+                return df
 
         logger.debug(f"📂 Нет датасета для сессии {session_id[:8]}")
         return None
+
+    def _convert_date_column(self, df: pd.DataFrame):
+        """Конвертирует колонку даты в datetime."""
+        if df.empty:
+            return
+        
+        # Ищем колонку даты по ключевым словам
+        date_keywords = ["date", "data", "дата", "invoice", "инвойс"]
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(kw in col_lower for kw in date_keywords):
+                try:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                    logger.debug(f"✓ Converted date column '{col}' to datetime")
+                    break  # Конвертируем только первую найденную колонку
+                except Exception as e:
+                    logger.debug(f"⚠️ Could not convert column '{col}' to datetime: {e}")
+                    continue
 
     def add_message(self, session_id: str, role: str, content: str):
         """Добавляет сообщение в историю сессии."""
@@ -108,6 +137,7 @@ class SessionManager:
 
         if self.redis_client:
             self.redis_client.rpush(history_key, json.dumps(message))
+            self.redis_client.expire(history_key, self.ttl)
             self.redis_client.ltrim(history_key, 0, 99)
         else:
             if history_key not in self.in_memory_store:
@@ -124,14 +154,14 @@ class SessionManager:
             return [json.loads(m) for m in messages_json]
         else:
             messages_json = self.in_memory_store.get(history_key, [])
-            return [json.loads(m) for m in reversed(messages_json[-limit:])]
+            return [json.loads(m) for m in messages_json[-limit:]]
 
     def set_forecast(self, session_id: str, forecast_data: Dict[str, Any]):
         """Сохраняет результат прогноза."""
         key = f"{self.FORECAST_KEY}{session_id}"
 
         if self.redis_client:
-            self.redis_client.set(key, json.dumps(forecast_data))
+            self.redis_client.set(key, json.dumps(forecast_data), ex=self.ttl)
         else:
             self.in_memory_store[key] = json.dumps(forecast_data)
 

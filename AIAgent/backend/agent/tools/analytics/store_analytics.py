@@ -5,8 +5,9 @@ from typing import Optional, Literal
 import pandas as pd
 from smolagents import tool
 
-from agent.state import get_session_manager
-from utils import find_columns
+from backend.agent.state import get_session_manager
+from backend.utils import find_columns
+from backend.agent.tools.data.load_tools import _get_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def analyze_store_profitability(
         return "❌ Датасет не загружен. Сначала вызовите load_dataset."
 
     # Авто-поиск колонок
-    date_col, sales_col, store_col = find_columns(df)
+    date_col, sales_col, store_col, product_col = find_columns(df)
 
     if not store_col:
         return "❌ В данных нет колонки магазина/локации. Невозможно выполнить анализ."
@@ -135,7 +136,7 @@ def compare_stores(
     if df is None:
         return "❌ Датасет не загружен."
 
-    _, sales_col, store_col = find_columns(df)
+    _, sales_col, store_col, product_col = find_columns(df)
     if not store_col or not sales_col:
         return "❌ Нет колонок магазина или продаж."
 
@@ -174,8 +175,3 @@ def compare_stores(
         lines.append(f"💎 Лучший средний чек: **{best_avg}** (${comparison.loc[best_avg, 'avg']:,.2f})")
 
     return "\n".join(lines)
-
-def _get_dataset(session_id: Optional[str]) -> Optional[pd.DataFrame]:
-    """Безопасное получение датасета из сессии."""
-    sid = session_id or "default"
-    return get_session_manager().get_dataset(sid)

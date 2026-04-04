@@ -65,6 +65,7 @@ class YandexGPTModel(Model):
             temperature: float = 0.7,
             max_tokens: int = 2000,
             api_endpoint: str = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+            request_timeout: int = 120,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -74,8 +75,9 @@ class YandexGPTModel(Model):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.api_endpoint = api_endpoint.rstrip("/")
+        self.request_timeout = request_timeout
         self.supports_tools = True
-        logger.info(f"✅ YandexGPTModel инициализирован: {model} в каталоге {folder_id}")
+        logger.info(f"✅ YandexGPTModel инициализирован: {model} в каталоге {folder_id} (timeout={request_timeout}s)")
 
     def generate(
             self,
@@ -112,7 +114,7 @@ class YandexGPTModel(Model):
                 self.api_endpoint,
                 json=payload,
                 headers=headers,
-                timeout=60
+                timeout=self.request_timeout,
             )
             response.raise_for_status()
             result = response.json()

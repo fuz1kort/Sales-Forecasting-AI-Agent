@@ -23,17 +23,15 @@ class ForecastConfig:
 
     # === Поддерживаемые модели и их алиасы ===
     # Основные названия
-    VALID_MODELS: tuple[str, ...] = ("neuralprophet", "sarima", "auto")
+    VALID_MODELS: tuple[str, ...] = ("prophet", "sarima", "ensemble", "auto")
 
     # Алиасы для удобства пользователя (например, из промпта агента)
     MODEL_ALIASES: dict[str, str] = field(default_factory=lambda: {
-        "neural": "neuralprophet",
-        "np": "neuralprophet",
-        "prophet": "neuralprophet",
         "arima": "sarima",
         "sarimax": "sarima",
         "best": "auto",
         "select": "auto",
+        "neuralprophet": "prophet",
     })
 
     # === Типы прогнозов ===

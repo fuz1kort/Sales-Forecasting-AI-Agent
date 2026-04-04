@@ -5,11 +5,11 @@
 для прогнозирования временных рядов продаж.
 """
 
-from .neuralprophet_model import neuralprophet_forecast
-from .sarima_model import sarima_forecast
+from backend.models.sarima_model import sarima_forecast
+from backend.models.catboost_model import catboost_forecast
 
 __all__ = [
-    "neuralprophet_forecast",
     "sarima_forecast",
+    "catboost_forecast",
 ]
 

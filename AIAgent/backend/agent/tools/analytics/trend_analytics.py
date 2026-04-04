@@ -5,8 +5,9 @@ from typing import Optional, Literal
 import pandas as pd
 from smolagents import tool
 
-from agent.state import get_session_manager
-from utils import find_columns
+from backend.agent.state import get_session_manager
+from backend.utils import find_columns
+from backend.agent.tools.data.load_tools import _get_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ PeriodType = Literal["daily", "weekly", "monthly", "quarterly"]
 @tool
 def analyze_trends(
         period: PeriodType = "monthly",
+        store_ids: Optional[str] = None,
+        location_ids: Optional[str] = None,
         session_id: Optional[str] = None
 ) -> str:
     """
@@ -28,6 +31,8 @@ def analyze_trends(
 
     Args:
         period: Период группировки: daily | weekly | monthly | quarterly
+        store_ids: ID магазинов через запятую (например "1,2,3")
+        location_ids: Фильтр по стране/регионам (например "USA,UK")
         session_id: ID сессии (опционально)
 
     Returns:
@@ -37,13 +42,27 @@ def analyze_trends(
     if df is None:
         return "❌ Датасет не загружен."
 
-    date_col, sales_col, _ = find_columns(df)
+    date_col, sales_col, store_col, _ = find_columns(df)
     if not date_col or not sales_col:
         return "❌ Нет колонок даты или продаж."
 
     # Подготовка данных
     df_copy = df.copy()
     df_copy[date_col] = pd.to_datetime(df_copy[date_col])
+
+    # Фильтр по магазинам
+    if store_ids and store_ids.lower() != "all" and store_col:
+        store_list = [s.strip() for s in store_ids.split(',')]
+        df_copy = df_copy[df_copy[store_col].astype(str).isin(store_list)]
+
+    # Фильтр по локации (страна/регион - дополнительный параметр)
+    if location_ids and location_ids.lower() != "all" and store_col:
+        location_list = [s.strip() for s in location_ids.split(',')]
+        df_copy = df_copy[df_copy[store_col].astype(str).isin(location_list)]
+
+    if df_copy.empty:
+        return "⚠️ Нет данных после применения фильтров"
+
     df_copy = df_copy.sort_values(date_col)
 
     # Маппинг периодов для pandas Grouper
@@ -121,7 +140,7 @@ def analyze_seasonality(
     if df is None:
         return "❌ Датасет не загружен."
 
-    date_col, sales_col, _ = find_columns(df)
+    date_col, sales_col, _, _ = find_columns(df)
     if not date_col or not sales_col:
         return "❌ Нет колонок даты или продаж."
 
@@ -178,11 +197,6 @@ def analyze_seasonality(
 
 
 # === Вспомогательные функции ===
-
-def _get_dataset(session_id: Optional[str]) -> Optional[pd.DataFrame]:
-    sid = session_id or "default"
-    return get_session_manager().get_dataset(sid)
-
 
 def _format_period_label(period_label, period_type: str) -> str:
     """Форматирует метку периода для отображения."""

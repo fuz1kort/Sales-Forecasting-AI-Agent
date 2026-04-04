@@ -15,17 +15,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # === Data tools ===
-from .data.load_tools import load_dataset, get_dataset_info
+from backend.agent.tools.data.load_tools import load_dataset, get_dataset_info
 
 # === Analytics tools ===
-from .analytics.product_analytics import analyze_top_products, analyze_product_categories
-from .analytics.trend_analytics import analyze_trends, analyze_seasonality
-from .analytics.kpi_analytics import analyze_kpi, analyze_general
-from .analytics.store_analytics import analyze_store_profitability, compare_stores
+from backend.agent.tools.analytics.product_analytics import analyze_top_products, analyze_product_categories, analyze_product_by_name
+from backend.agent.tools.analytics.trend_analytics import analyze_trends, analyze_seasonality
+from backend.agent.tools.analytics.kpi_analytics import analyze_kpi, analyze_general
+from backend.agent.tools.analytics.store_analytics import analyze_store_profitability, compare_stores
+from backend.agent.tools.analytics.stationarity_analytics import analyze_stationarity_tool
+from backend.agent.tools.analytics.data_visualization import visualize_correlations, visualize_distributions, visualize_time_series, visualize_top_products, visualize_abc_analysis
 
 # === Forecast tools ===
-from .forecast.forecast_tools import build_forecast, get_forecast_summary
-from .forecast.backtest_tools import run_backtest
+from backend.agent.tools.forecast.forecast_tools import build_forecast, get_forecast_summary
+from backend.agent.tools.forecast.backtest_tools import run_backtest
 
 # === Экспорт для удобного импорта ===
 __all__ = [
@@ -36,6 +38,7 @@ __all__ = [
     # Product Analytics
     "analyze_top_products",
     "analyze_product_categories",
+    "analyze_product_by_name",
 
     # Trend Analytics
     "analyze_trends",
@@ -48,6 +51,16 @@ __all__ = [
     # Store Analytics
     "analyze_store_profitability",
     "compare_stores",
+
+    # Stationarity Analytics
+    "analyze_stationarity_tool",
+
+    # Data Visualization
+    "visualize_correlations",
+    "visualize_distributions",
+    "visualize_time_series",
+    "visualize_top_products",
+    "visualize_abc_analysis",
 
     # Forecast
     "build_forecast",

@@ -6,12 +6,13 @@ from __future__ import annotations
 import logging
 from typing import Optional, Literal
 
+import pandas as pd
 from smolagents import tool
 
-from agent.state import get_session_manager
-from services.forecast_service import get_forecast
-from config.forecast_config import forecast_config
-from schemas.forecast_types import ForecastResult, ForecastSummary
+from backend.agent.state import get_session_manager
+from backend.services.forecast_service import get_forecast
+from backend.config.forecast_config import forecast_config
+from backend.schemas.forecast_types import ForecastResult, ForecastSummary
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,12 @@ def _get_session_id(session_id: Optional[str]) -> str:
 @tool
 def build_forecast(
         periods: int = forecast_config.DEFAULT_PERIODS,
-        model_type: Literal["neuralprophet", "sarima"] = "neuralprophet",
+        model_type: Literal["prophet", "sarima", "ensemble", "auto"] = "auto",
         forecast_type: str = "general",
         store_ids: Optional[str] = None,
+        location_ids: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
         session_id: Optional[str] = None,
 ) -> ForecastResult:
     """
@@ -53,9 +57,12 @@ def build_forecast(
 
     Args:
         periods: Горизонт прогноза в днях (7..365, по умолчанию 30)
-        model_type: "neuralprophet" | "sarima" | "auto"
+        model_type: "prophet" | "sarima" | "ensemble" | "auto" (авто-выбор лучшей модели по метрикам)
         forecast_type: "general" (агрегированный) | "by_store" (по магазинам)
-        store_ids: Строка с ID магазинов: "store_1, store_2"
+        store_ids: ID магазинов через запятую (например "1,2,3")
+        location_ids: Фильтр по стране/регионам (например "USA,UK")
+        date_from: Начальная дата для обучения модели (YYYY-MM-DD)
+        date_to: Конечная дата для обучения модели (YYYY-MM-DD)
         session_id: ID сессии пользователя
 
     Returns:
@@ -64,25 +71,65 @@ def build_forecast(
     session_id = _get_session_id(session_id)
     session_manager = get_session_manager()
 
+    logger.info(
+        f"🔧 build_forecast called: session_id={session_id[:8]}, periods={periods}, model_type={model_type}, "
+        f"forecast_type={forecast_type}, store_ids={store_ids}, date_from={date_from}, date_to={date_to}"
+    )
+
     df = session_manager.get_dataset(session_id)
     if df is None:
+        logger.warning(f"❌ build_forecast: no dataset for session {session_id[:8]}")
         return {
             "status": "error",
             "error": "Датасет не загружен. Сначала вызовите load_dataset."
         }
 
+    # Применяем фильтры по датам
+    from backend.utils import find_columns
+    date_col, sales_col, store_col, product_col = find_columns(df)
+    if date_col and (date_from or date_to):
+        df = df.copy()
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        if date_from:
+            df = df[df[date_col] >= pd.to_datetime(date_from)]
+        if date_to:
+            df = df[df[date_col] <= pd.to_datetime(date_to)]
+        if df.empty:
+            return {
+                "status": "error",
+                "error": "Нет данных после применения фильтров по датам."
+            }
+
     # Парсим store_ids из строки в список
     store_list = None
-    if store_ids and store_ids.strip():
+    if store_ids and store_ids.strip() and store_ids.lower() != "all":
         store_list = [s.strip() for s in store_ids.split(",") if s.strip()]
+
+    # Парсим location_ids из строки в список (дополнительный фильтр)
+    location_list = None
+    if location_ids and location_ids.strip() and location_ids.lower() != "all":
+        location_list = [s.strip() for s in location_ids.split(",") if s.strip()]
+
+    # Применяем фильтры по store_ids и location_ids если заданы
+    df_filtered = df.copy() if (store_list or location_list) else df
+    if (store_list or location_list) and store_col:
+        if store_list:
+            df_filtered = df_filtered[df_filtered[store_col].astype(str).isin(store_list)]
+        if location_list:
+            df_filtered = df_filtered[df_filtered[store_col].astype(str).isin(location_list)]
+        if df_filtered.empty:
+            return {
+                "status": "error",
+                "error": "Нет данных после применения фильтров по store_ids/location_ids."
+            }
 
     try:
         result = get_forecast(
-            df=df,
+            df=df_filtered,
             model_type=model_type,
             periods=periods,
             forecast_type=forecast_type,
-            store_ids=store_list,
+            store_ids=None,  # Фильтрация уже применена
         )
 
         # Кэшируем успешный результат
@@ -127,6 +174,7 @@ def get_forecast_summary(
     forecast = session_manager.get_forecast_by_session(session_id)
 
     if not forecast or "forecast" not in forecast:
+        logger.info(f"📭 get_forecast_summary: no forecast stored for session {session_id[:8]}")
         return {
             "status": "no_forecast",
             "periods": 0,
@@ -158,7 +206,7 @@ def get_forecast_summary(
     total = sum(values)
     count = len(values)
 
-    return {
+    result = {
         "status": "success",
         "periods": count,
         "total_forecast": round(total, 2),
@@ -168,3 +216,10 @@ def get_forecast_summary(
         "first_date": fc_data[0].get("date", ""),
         "last_date": fc_data[-1].get("date", ""),
     }
+
+    logger.info(
+        f"📊 get_forecast_summary: session={session_id[:8]}, periods={count}, "
+        f"average_daily={result['average_daily']}, total_forecast={result['total_forecast']}"
+    )
+
+    return result

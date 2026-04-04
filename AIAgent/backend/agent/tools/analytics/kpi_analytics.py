@@ -5,14 +5,19 @@ from typing import Optional
 import pandas as pd
 from smolagents import tool
 
-from agent.state import get_session_manager
-from utils import find_columns
+from backend.agent.state import get_session_manager
+from backend.utils import find_columns
+from backend.agent.tools.data.load_tools import _get_dataset
 
 logger = logging.getLogger(__name__)
 
 
 @tool
 def analyze_kpi(
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        store_ids: Optional[str] = None,
+        location_ids: Optional[str] = None,
         session_id: Optional[str] = None
 ) -> str:
     """
@@ -24,6 +29,10 @@ def analyze_kpi(
     - "давай сводку по продажам"
 
     Args:
+        date_from: Начальная дата фильтрации (YYYY-MM-DD)
+        date_to: Конечная дата фильтрации (YYYY-MM-DD)
+        store_ids: ID магазинов через запятую (например "1,2,3")
+        location_ids: Фильтр по стране/регионам (например "USA,UK")
         session_id: ID сессии (опционально)
 
     Returns:
@@ -33,15 +42,39 @@ def analyze_kpi(
     if df is None:
         return "❌ Датасет не загружен."
 
-    date_col, sales_col, store_col = find_columns(df)
+    date_col, sales_col, store_col, product_col = find_columns(df)
     if not sales_col:
         return "❌ Не найдена колонка продаж."
 
+    # Применяем фильтры
+    filtered_df = df.copy()
+
+    # Фильтр по датам
+    if date_col and (date_from or date_to):
+        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        if date_from:
+            filtered_df = filtered_df[filtered_df[date_col] >= pd.to_datetime(date_from)]
+        if date_to:
+            filtered_df = filtered_df[filtered_df[date_col] <= pd.to_datetime(date_to)]
+
+    # Фильтр по магазинам
+    if store_ids and store_ids.lower() != "all" and store_col:
+        store_list = [s.strip() for s in store_ids.split(',')]
+        filtered_df = filtered_df[filtered_df[store_col].astype(str).isin(store_list)]
+
+    # Фильтр по локации (страна/регион - дополнительный параметр)
+    if location_ids and location_ids.lower() != "all" and store_col:
+        location_list = [s.strip() for s in location_ids.split(',')]
+        filtered_df = filtered_df[filtered_df[store_col].astype(str).isin(location_list)]
+
+    if filtered_df.empty:
+        return "⚠️ Нет данных после применения фильтров"
+
     # === Основные метрики ===
-    total_sales = df[sales_col].sum()
-    avg_sales = df[sales_col].mean()
-    median_sales = df[sales_col].median()
-    transactions = len(df)
+    total_sales = filtered_df[sales_col].sum()
+    avg_sales = filtered_df[sales_col].mean()
+    median_sales = filtered_df[sales_col].median()
+    transactions = len(filtered_df)
 
     # === Дополнительные метрики (если есть данные) ===
     metrics = [
@@ -53,10 +86,10 @@ def analyze_kpi(
     ]
 
     # Если есть колонка магазина
-    if store_col and store_col in df.columns:
-        stores = df[store_col].nunique()
-        top_store = df.groupby(store_col)[sales_col].sum().idxmax()
-        top_store_sales = df.groupby(store_col)[sales_col].sum().max()
+    if store_col and store_col in filtered_df.columns:
+        stores = filtered_df[store_col].nunique()
+        top_store = filtered_df.groupby(store_col)[sales_col].sum().idxmax()
+        top_store_sales = filtered_df.groupby(store_col)[sales_col].sum().max()
         metrics.extend([
             f"\n🏪 **Магазины:**",
             f"  • Всего: {stores}",
@@ -64,14 +97,14 @@ def analyze_kpi(
         ])
 
     # Если есть дата — добавляем период
-    if date_col and date_col in df.columns:
+    if date_col and date_col in filtered_df.columns:
         try:
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-            date_range = f"{df[date_col].min().date()} — {df[date_col].max().date()}"
+            filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+            date_range = f"{filtered_df[date_col].min().date()} — {filtered_df[date_col].max().date()}"
             metrics.append(f"\n📅 **Период:** {date_range}")
 
             # Продажи в день (если данных достаточно)
-            days = (df[date_col].max() - df[date_col].min()).days + 1
+            days = (filtered_df[date_col].max() - filtered_df[date_col].min()).days + 1
             if days > 0:
                 daily_avg = total_sales / days
                 metrics.append(f"  • В среднем в день: ${daily_avg:,.2f}")
@@ -112,7 +145,7 @@ def analyze_general(
     if df is None:
         return "❌ Датасет не загружен."
 
-    date_col, sales_col, store_col = find_columns(df)
+    date_col, sales_col, store_col, product_col = find_columns(df)
 
     lines = ["📋 **ОБЗОР ДАННЫХ**\n"]
 
@@ -152,10 +185,3 @@ def analyze_general(
         lines.append(f"  • 🔴 Полнота: {completeness:.1f}% (много пропусков)")
 
     return "\n".join(lines)
-
-
-# === Вспомогательные функции ===
-
-def _get_dataset(session_id: Optional[str]) -> Optional[pd.DataFrame]:
-    sid = session_id or "default"
-    return get_session_manager().get_dataset(sid)

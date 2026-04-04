@@ -5,7 +5,7 @@
 - Валидацию входных данных
 - Нормализацию параметров
 - Выбор модели (включая auto-режим)
-- Вызов конкретных реализаций (NeuralProphet / SARIMA)
+- Вызов конкретных реализаций (Prophet / SARIMA)
 - Обработку ошибок и логирование
 
 Это «чистый» слой: не зависит от фреймворков (FastAPI, smolagents),
@@ -16,11 +16,13 @@ from typing import List, Optional
 
 import pandas as pd
 
-from services.backtest_service import backtest_models
-from config.forecast_config import forecast_config
-from models import neuralprophet_forecast, sarima_forecast
-from schemas.forecast_types import ForecastResult
-from utils import find_columns
+from backend.services.backtest_service import backtest_models
+from backend.config.forecast_config import forecast_config
+from backend.models import sarima_forecast, catboost_forecast
+from backend.models.prophet_model import prophet_forecast as prophet_forecast
+from backend.models.catboost_model import ensemble_forecast_optimized
+from backend.schemas.forecast_types import ForecastResult
+from backend.utils import find_columns, smape
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +65,8 @@ def _validate_dataframe(df: pd.DataFrame) -> Optional[str]:
         return "Пустой DataFrame: нет данных для прогноза."
 
     # Проверка наличия столбца с продажами
-    # find_columns возвращает (date_col, sales_col, store_col)
-    _, sales_col, _ = find_columns(df)
+    # find_columns возвращает (date_col, sales_col, store_col, product_col)
+    _, sales_col, _, _ = find_columns(df)
 
     if not sales_col:
         return (
@@ -84,7 +86,7 @@ def _resolve_model_type(model_type: str) -> str:
         model_type: Название модели от пользователя
 
     Returns:
-        Каноническое название: "neuralprophet" | "sarima" | "auto"
+        Каноническое название: "prophet" | "sarima" | "auto"
 
     Example:
         >>> _resolve_model_type("NP")
@@ -124,13 +126,13 @@ def select_best_model(df: pd.DataFrame, periods: int) -> str:
 
     result = backtest_models(df, test_days=test_days)
 
-    # Если backtest упал — фоллбэк на NeuralProphet (обычно стабильнее)
+    # Если backtest упал — фоллбэк на Prophet (обычно стабильнее)
     if isinstance(result, dict) and result.get("error"):
-        logger.warning(f"⚠️ Backtest failed: {result['error']}. Fallback to neuralprophet")
-        return "neuralprophet"
+        logger.warning(f"⚠️ Backtest failed: {result['error']}. Fallback to prophet")
+        return "prophet"
 
     # Извлекаем название лучшей модели
-    best_model = (result or {}).get("best_model", "neuralprophet")
+    best_model = (result or {}).get("best_model", "prophet")
     logger.info(f"🎯 Auto-selected model: {best_model}")
 
     return best_model
@@ -138,7 +140,7 @@ def select_best_model(df: pd.DataFrame, periods: int) -> str:
 
 def get_forecast(
         df: pd.DataFrame,
-        model_type: str = "neuralprophet",
+        model_type: str = "prophet",
         periods: int = forecast_config.DEFAULT_PERIODS,
         forecast_type: str = "general",
         store_ids: Optional[List[str]] = None,
@@ -153,12 +155,12 @@ def get_forecast(
 
     Args:
         df: DataFrame с историческими данными
-        model_type: "neuralprophet" | "sarima" | "auto" (с алиасами)
+        model_type: "prophet" | "sarima" | "auto" (с алиасами)
         periods: Горизонт прогноза в днях (автоматически ограничивается)
         forecast_type: "general" (агрегированный) или "by_store" (по магазинам)
         store_ids: Список ID магазинов для фильтрации (опционально)
-        start_date: Начало диапазона прогноза (для NeuralProphet)
-        end_date: Конец диапазона прогноза (для NeuralProphet)
+        start_date: Начало диапазона прогноза (для Prophet)
+        end_date: Конец диапазона прогноза (для Prophet)
 
     Returns:
         ForecastResult: Словарь с прогнозом, метриками или ошибкой
@@ -199,8 +201,8 @@ def get_forecast(
                 forecast_type=forecast_type,
                 store_ids=store_ids_norm,
             )
-        else:  # neuralprophet (по умолчанию)
-            result = neuralprophet_forecast(
+        elif model_type == "prophet":
+            result = prophet_forecast(
                 df=df,
                 periods=periods,
                 forecast_type=forecast_type,
@@ -208,17 +210,42 @@ def get_forecast(
                 start_date=start_date,
                 end_date=end_date,
             )
+        elif model_type == "ensemble":
+            result = ensemble_forecast_optimized(
+                df=df,
+                periods=periods,
+                forecast_type=forecast_type,
+                store_ids=store_ids_norm,
+            )
+        else:
+            logger.warning(f"⚠️ Unknown model_type '{model_type}', fallback to ensemble")
+            result = ensemble_forecast_optimized(
+                df=df,
+                periods=periods,
+                forecast_type=forecast_type,
+                store_ids=store_ids_norm,
+            )
 
         # === Шаг 5: Обогащение результата мета-информацией ===
         if isinstance(result, dict) and result.get("status") != "error":
             # Добавляем информацию о том, какая модель реально использовалась
-            info = result.get("info", {})
-            info.update({
-                "model_used": model_type,
-                "periods_requested": periods,
-                "forecast_type": forecast_type,
-            })
-            result["info"] = info
+            info = result.get("info", "")
+            if isinstance(info, str):
+                # Если info - строка, создаем словарь
+                result["info"] = {
+                    "description": info,
+                    "model_used": model_type,
+                    "periods_requested": periods,
+                    "forecast_type": forecast_type,
+                }
+            elif isinstance(info, dict):
+                # Если info - словарь, обновляем его
+                info.update({
+                    "model_used": model_type,
+                    "periods_requested": periods,
+                    "forecast_type": forecast_type,
+                })
+                result["info"] = info
 
         return result  # type: ignore[return-value]
 
@@ -229,3 +256,4 @@ def get_forecast(
             "status": "error",
             "error": f"Service error: {type(e).__name__}: {e}"
         }
+

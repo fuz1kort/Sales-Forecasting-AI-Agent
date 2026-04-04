@@ -7,15 +7,19 @@ import pandas as pd
 import numpy as np
 from smolagents import tool
 
-from agent.state import get_session_manager
-from utils import find_columns
-from models import neuralprophet_forecast, sarima_forecast
+from backend.agent.state import get_session_manager
+from backend.utils import find_columns
+from backend.models import sarima_forecast
 
 logger = logging.getLogger(__name__)
 
 @tool
 def run_backtest(
         test_days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        store_ids: Optional[str] = None,
+        location_ids: Optional[str] = None,
         session_id: Optional[str] = None
 ) -> dict:
     """
@@ -23,7 +27,7 @@ def run_backtest(
 
     Вызывайте, когда нужно:
     - "какая модель лучше для моих данных?"
-    - "сравни NeuralProphet и ARIMA"
+    - "сравни модели прогнозирования"
     - "проверь точность прогноза"
 
     Алгоритм:
@@ -34,6 +38,10 @@ def run_backtest(
 
     Args:
         test_days: Количество дней для тестовой выборки (7..90)
+        date_from: Начальная дата для обучения (YYYY-MM-DD)
+        date_to: Конечная дата для обучения (YYYY-MM-DD)
+        store_ids: ID магазинов через запятую (например "1,2,3")
+        location_ids: Фильтр по стране/регионам (например "USA,UK")
         session_id: ID сессии (опционально)
 
     Returns:
@@ -54,16 +62,43 @@ def run_backtest(
             "error": "Датасет не загружен. Сначала вызовите load_dataset."
         }
 
+    # Применяем фильтры
+    filtered_df = df.copy()
+
+    # Фильтр по датам
+    date_col, sales_col, store_col, product_col = find_columns(df)
+    if date_col and (date_from or date_to):
+        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        if date_from:
+            filtered_df = filtered_df[filtered_df[date_col] >= pd.to_datetime(date_from)]
+        if date_to:
+            filtered_df = filtered_df[filtered_df[date_col] <= pd.to_datetime(date_to)]
+
+    # Фильтр по магазинам
+    if store_ids and store_ids.lower() != "all" and store_col:
+        store_list = [s.strip() for s in store_ids.split(',')]
+        filtered_df = filtered_df[filtered_df[store_col].astype(str).isin(store_list)]
+
+    # Фильтр по локации (страна/регион - дополнительный параметр)
+    if location_ids and location_ids.lower() != "all" and store_col:
+        location_list = [s.strip() for s in location_ids.split(',')]
+        filtered_df = filtered_df[filtered_df[store_col].astype(str).isin(location_list)]
+
+    if filtered_df.empty:
+        return {
+            "status": "error",
+            "error": "Нет данных после применения фильтров."
+        }
+
     # Валидация параметров
     test_days = max(7, min(90, int(test_days)))
 
-    if len(df) < test_days + 10:
+    if len(filtered_df) < test_days + 10:
         return {
             "status": "error",
-            "error": f"Недостаточно данных. Нужно ≥{test_days + 10} строк, есть {len(df)}"
+            "error": f"Недостаточно данных. Нужно ≥{test_days + 10} строк, есть {len(filtered_df)}"
         }
 
-    date_col, sales_col, _ = find_columns(df)
     if not date_col or not sales_col:
         return {"status": "error", "error": "Не найдены колонки даты или продаж"}
 
@@ -71,12 +106,12 @@ def run_backtest(
         logger.info(f"🔬 Запуск backtest: {test_days} тестовых дней")
 
         # Подготовка данных
-        df = df.copy()
-        df[date_col] = pd.to_datetime(df[date_col])
-        df = df.sort_values(date_col).reset_index(drop=True)
+        filtered_df = filtered_df.copy()
+        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col])
+        filtered_df = filtered_df.sort_values(date_col).reset_index(drop=True)
 
-        train_df = df.iloc[:-test_days].copy()
-        test_df = df.iloc[-test_days:].copy()
+        train_df = filtered_df.iloc[:-test_days].copy()
+        test_df = filtered_df.iloc[-test_days:].copy()
 
         results = {
             "status": "success",
@@ -86,13 +121,6 @@ def run_backtest(
             "metrics": {},
             "best_model": None,
         }
-
-        # Тестируем NeuralProphet
-        np_result = _test_model(
-            "neuralprophet", neuralprophet_forecast,
-            train_df, test_df, sales_col, test_days
-        )
-        results["metrics"]["neuralprophet"] = np_result
 
         # Тестируем SARIMA
         sarima_result = _test_model(

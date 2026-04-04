@@ -7,6 +7,19 @@ import json
 from matplotlib import pyplot as plt
 
 
+def _append_chat_history(role: str, content: str, is_code: bool = False):
+    """Добавить сообщение в историю, если это не дубликат последнего."""
+    if st.session_state.chat_history:
+        last = st.session_state.chat_history[-1]
+        if last.get("role") == role and last.get("content") == content:
+            return
+    st.session_state.chat_history.append({
+        "role": role,
+        "content": content,
+        "is_code": is_code
+    })
+
+
 def render_chat_section(api_client):
     """Рендер секции чата с блокировкой во время запроса."""
     st.header("💬 Чат с аналитиком")
@@ -33,11 +46,15 @@ def render_chat_section(api_client):
     prompt = st.chat_input("Спросите о продажах, прогнозе или данных...")
 
     if prompt:
+        # Добавляем сообщение пользователя
+        _append_chat_history("user", prompt)
+
+        # Показываем сообщение пользователя сразу
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
         # Устанавливаем блокировку
         st.session_state.loading = True
-
-        # Добавляем сообщение пользователя
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
 
         # Отправляем запрос
         try:
@@ -50,11 +67,11 @@ def render_chat_section(api_client):
                     with st.chat_message("assistant"):
                         render_agent_response(answer)
 
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "is_code": "<code>" in answer
-                    })
+                    _append_chat_history(
+                        "assistant",
+                        answer,
+                        is_code="<code>" in answer
+                    )
                 else:
                     error_msg = response.get("error", "Неизвестная ошибка")
                     st.error(f"❌ Ошибка: {error_msg}")
@@ -69,18 +86,13 @@ def render_chat_section(api_client):
 
 
 def render_agent_response(text: str, is_code: bool = False):
-    """Форматирует ответ агента для отображения и строит график/таблицу, если это прогноз."""
+    """Форматирует ответ агента для отображения."""
     if not text:
         return
 
-    # Попробуем распарсить прогноз
-    forecast_result = try_parse_forecast(text)
-    if forecast_result:
-        st.subheader("📊 Таблица прогноза")
-        render_forecast_table(forecast_result)
-        st.subheader("📈 График прогноза")
-        plot_forecast(forecast_result)
-        return
+    # Для старых сообщений (уже сохраненных в истории) не пытаемся парсить графики
+    # Парсим графики только для новых ответов агента
+    # Это предотвращает показ старых данных при загрузке
 
     # Иначе это обычный текст/markdown
     safe_text = format_markdown_safe(text)
@@ -105,14 +117,8 @@ def try_parse_forecast(text: str) -> dict | None:
     if isinstance(text, dict) and "forecast" in text:
         return text
 
-    try:
-        # Иногда агент возвращает JSON в виде строки
-        parsed = json.loads(text)
-        if "forecast" in parsed:
-            return parsed
-    except Exception:
-        return None
-
+    # Не пытаемся парсить обычный текст как JSON
+    # JSON должен быть в специальном формате или маркерах
     return None
 
 
@@ -139,6 +145,74 @@ def plot_forecast(forecast_result, n_days: int = 30):
     plt.grid(True)
     plt.tight_layout()
     st.pyplot(plt.gcf())
+
+
+def try_parse_chart(text: str):
+    """Парсит JSON графиков из ответа агента."""
+    import json
+    import re
+
+    # Ищем JSON блоки
+    json_pattern = r'```json\s*(\{.*?\})\s*```'
+    matches = re.findall(json_pattern, text, re.DOTALL)
+
+    for match in matches:
+        try:
+            data = json.loads(match)
+            if isinstance(data, dict) and "type" in data:
+                return data
+        except json.JSONDecodeError:
+            continue
+
+    return None
+
+
+def render_chart(chart_data):
+    """Рендерит график на основе данных."""
+    chart_type = chart_data.get("type")
+    title = chart_data.get("title", "")
+
+    if chart_type == "heatmap":
+        import plotly.graph_objects as go
+        fig = go.Figure(data=go.Heatmap(
+            z=chart_data["z"],
+            x=chart_data["x"],
+            y=chart_data["y"],
+            text=chart_data.get("text"),
+            colorscale='RdBu',
+            hoverongaps=False
+        ))
+        fig.update_layout(title=title)
+        st.plotly_chart(fig)
+
+    elif chart_type == "histogram":
+        import plotly.express as px
+        fig = px.histogram(x=chart_data["x"], nbins=chart_data.get("nbinsx", 50), title=title)
+        st.plotly_chart(fig)
+
+    elif chart_type == "box":
+        import plotly.express as px
+        fig = px.box(y=chart_data["y"], title=title)
+        st.plotly_chart(fig)
+
+    elif chart_type == "line":
+        import plotly.express as px
+        fig = px.line(x=chart_data["x"], y=chart_data["y"], title=title)
+        st.plotly_chart(fig)
+
+    elif chart_type == "bar":
+        import plotly.express as px
+        fig = px.bar(x=chart_data["x"], y=chart_data["y"], title=title)
+        st.plotly_chart(fig)
+
+    elif chart_type == "pie":
+        import plotly.express as px
+        fig = px.pie(names=chart_data["labels"], values=chart_data["values"], title=title)
+        st.plotly_chart(fig)
+
+    else:
+        st.info(f"Неизвестный тип графика: {chart_type}")
+
 
 def format_markdown_safe(text: str) -> str:
     """Безопасно форматирует Markdown текст."""
