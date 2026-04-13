@@ -11,13 +11,6 @@
 - **📦 Анализ товаров** - KPI, тренды, сезонность, топ-продукты
 - **🔄 Интерактивный чат** - Общение с агентом на естественном языке
 
-## 🛠️ Системные требования
-
-- **Python**: 3.9+
-- **Оперативная память**: 4GB+ (рекомендуется 8GB+)
-- **Дисковое пространство**: 2GB+ для зависимостей и данных
-- **ОС**: Windows 10+, macOS 10.15+, Linux Ubuntu 18.04+
-
 ## 📦 Установка
 
 ### 1. Клонирование репозитория
@@ -203,37 +196,6 @@ AIAgent/
 2. Добавьте импорт в `backend/models/__init__.py`
 3. Обновите сервисы в `backend/services/`
 
-## 🐛 Возможные проблемы и решения
-
-### Проблема: "ModuleNotFoundError" при запуске
-
-**Решение**: Убедитесь, что виртуальное окружение активировано:
-```bash
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/macOS
-```
-
-### Проблема: Backend не запускается
-
-**Решение**: Проверьте переменные окружения в `.env` файле
-
-### Проблема: Ошибка импорта catboost
-
-**Решение**: Установите catboost отдельно:
-```bash
-pip install catboost
-```
-
-### Проблема: Недостаточно памяти
-
-**Решение**: Для больших датасетов увеличьте оперативную память или используйте меньший размер выборки
-
-### Проблема: API ключи не работают
-
-**Решение**: Проверьте правильность API ключей и доступность сервисов:
-- YandexGPT: https://yandex.cloud/ru/docs/foundation-models/
-- OpenAI: https://platform.openai.com/
-
 ## 📊 Модели прогнозирования
 
 ### Prophet (Facebook)
@@ -252,28 +214,7 @@ pip install catboost
 - Комбинирует все 3 модели для повышения точности
 - Автоматический выбор лучшей модели
 
-## 🤝 Вклад в проект
-
-1. Fork репозиторий
-2. Создайте feature branch: `git checkout -b feature/new-feature`
-3. Commit изменения: `git commit -am 'Add new feature'`
-4. Push в branch: `git push origin feature/new-feature`
-5. Создайте Pull Request
-
-## 📄 Лицензия
-
-MIT License - см. файл LICENSE для подробностей.
-
-## 📞 Поддержка
-
-Если у вас возникли вопросы или проблемы:
-1. Проверьте раздел "Возможные проблемы и решения"
-2. Создайте Issue в репозитории
-3. Опишите вашу проблему с максимальными деталями
-
----
-
 **Приятного использования! 🚀**
 
-*Sales Forecasting Agent v4.0 - Powered by SmolAgents + Ensemble Models*</content>
+*Sales Forecasting Agent v0.51*</content>
 <parameter name="filePath">C:\Users\gafar\source\fuz1kort\Sales-Forecasting-AI-Agent\AIAgent\README.md
