@@ -16,7 +16,7 @@
 ### 1. Клонирование репозитория
 
 ```bash
-git clone <repository-url>
+git clone [<repository-url>](https://github.com/fuz1kort/Sales-Forecasting-AI-Agent.git)
 cd Sales-Forecasting-AI-Agent/AIAgent
 ```
 
