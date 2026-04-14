@@ -78,6 +78,7 @@ def catboost_forecast(
 
     # Прогноз на будущее
     last_row = df_weekly.iloc[-1].copy()
+    last_date = last_row['Date']
     future_forecasts = []
     for i in range(periods):
         # Обновление фич
@@ -91,7 +92,13 @@ def catboost_forecast(
         X_future = last_row[features].values.reshape(1, -1)
         pred = model.predict(X_future)[0]
         last_row['Revenue'] = pred
-        future_forecasts.append(pred)
+        
+        next_date = last_date + pd.Timedelta(days=1)
+        future_forecasts.append({
+            "date": next_date.strftime("%Y-%m-%d"),
+            "forecast": float(pred)
+        })
+        last_date = next_date
 
     # Метрики
     mae = np.mean(np.abs(y_test - forecast_test))

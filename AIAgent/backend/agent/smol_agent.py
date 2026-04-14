@@ -1,15 +1,34 @@
 """Ядро интеллектуального агента."""
+import json
 import logging
+import re
+import uuid
 from typing import Optional, Dict, Any, List, Tuple
 
-import uuid, re, json
 from smolagents import CodeAgent, ToolCallingAgent
 
 from backend.agent.memory import SalesAgentMemory
 from backend.agent.models.yandex import YandexGPTModel
 from backend.agent.state import get_session_manager
-from backend.agent.tools import load_dataset, get_dataset_info, build_forecast,get_forecast_summary,run_backtest,analyze_top_products,analyze_trends,analyze_kpi,analyze_seasonality,analyze_general,analyze_stationarity_tool,visualize_correlations,visualize_distributions,visualize_time_series,visualize_top_products,visualize_abc_analysis,analyze_product_by_name
-
+from backend.agent.tools import (
+    load_dataset,
+    get_dataset_info,
+    build_forecast,
+    get_forecast_summary,
+    run_backtest,
+    analyze_top_products,
+    analyze_trends,
+    analyze_kpi,
+    analyze_seasonality,
+    analyze_general,
+    analyze_stationarity_tool,
+    analyze_product_by_name,
+    visualize_correlations,
+    visualize_distributions,
+    visualize_time_series,
+    visualize_top_products,
+    visualize_abc_analysis,
+)
 from backend.config import AppSettings
 
 logger = logging.getLogger(__name__)

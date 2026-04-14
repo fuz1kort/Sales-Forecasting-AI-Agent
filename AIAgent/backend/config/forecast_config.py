@@ -42,6 +42,11 @@ class ForecastConfig:
     AUTO_BACKTEST_MIN_DAYS: int = 14
     AUTO_BACKTEST_MAX_DAYS: int = 60
 
+    # === Параметры Prophet ===
+    PROPHET_INTERVAL_WIDTH: float = 0.95  # 95% confidence interval
+    PROPHET_SEASONALITY_MODE: str = "multiplicative"  # или "additive"
+    PROPHET_COUNTRY: str = "UK"    # Для добавления праздников
+
     # === Системные настройки ===
     DEFAULT_SESSION_ID: str = "default"  # ID сессии по умолчанию
     CACHE_FORECAST: bool = True          # Кэшировать ли результат в Redis

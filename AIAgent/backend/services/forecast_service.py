@@ -5,7 +5,7 @@
 - Валидацию входных данных
 - Нормализацию параметров
 - Выбор модели (включая auto-режим)
-- Вызов конкретных реализаций (Prophet / SARIMA)
+- Вызов конкретных реализаций (Prophet / SARIMA / CatBoost)
 - Обработку ошибок и логирование
 
 Это «чистый» слой: не зависит от фреймворков (FastAPI, smolagents),
@@ -19,7 +19,7 @@ import pandas as pd
 from backend.services.backtest_service import backtest_models
 from backend.config.forecast_config import forecast_config
 from backend.models import sarima_forecast, catboost_forecast
-from backend.models.prophet_model import prophet_forecast as prophet_forecast
+from backend.models.prophet_model import prophet_forecast
 from backend.models.catboost_model import ensemble_forecast_optimized
 from backend.schemas.forecast_types import ForecastResult
 from backend.utils import find_columns, smape

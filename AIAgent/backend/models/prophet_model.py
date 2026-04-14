@@ -1,14 +1,21 @@
 """
 Модель прогнозирования на основе Prophet.
 
-Использует аддитивную модель для прогнозирования временных рядов продаж.
+Использует Prophet для прогнозирования временных рядов продаж.
+Поддерживает:
+- Праздники конкретной страны
+- Дополнительные регрессоры (weekend, день месяца, месяц)
+- Мультипликативную сезонность
 """
 
 import pandas as pd
 import numpy as np
+import logging
 from prophet import Prophet
 
 from backend.utils import find_columns
+
+logger = logging.getLogger(__name__)
 
 
 def prophet_forecast(
@@ -18,6 +25,7 @@ def prophet_forecast(
     store_ids: list | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    country: str = "UK",
 ):
     """
     Прогноз продаж на основе Prophet.
@@ -29,6 +37,7 @@ def prophet_forecast(
         store_ids: Список ID магазинов (None = все)
         start_date: Начальная дата прогноза (опционально)
         end_date: Конечная дата прогноза (опционально)
+        country: Код страны для добавления праздников (UK, US, RU, etc)
 
     Returns:
         Словарь с прогнозом, метриками и информацией о модели
@@ -52,7 +61,7 @@ def prophet_forecast(
         try:
             df[date_col] = pd.to_datetime(df[date_col])
         except Exception as e:
-            print(f"Ошибка парсинга дат: {e}")
+            logger.warning(f"Ошибка парсинга дат: {e}. Используется синтетическая дата.")
             df = df.copy()
             df['synthetic_date'] = pd.date_range(start='2023-01-01', periods=len(df), freq='D')
             date_col = 'synthetic_date'
@@ -60,10 +69,37 @@ def prophet_forecast(
     # Агрегация по дням
     df_agg = df.groupby(date_col)[sales_col].sum().reset_index()
     df_agg.columns = ['ds', 'y']
+    
+    # Добавляем дополнительные регрессоры
+    df_agg['is_weekend'] = df_agg['ds'].dt.weekday.isin([5, 6]).astype(int)
+    df_agg['day_of_month'] = df_agg['ds'].dt.day
+    df_agg['month'] = df_agg['ds'].dt.month
 
     # Обучение модели
-    model = Prophet()
-    model.fit(df_agg)
+    try:
+        model = Prophet(
+            interval_width=0.95,
+            weekly_seasonality=True,
+            yearly_seasonality=True,
+            seasonality_mode='multiplicative',
+            changepoint_prior_scale=0.1
+        )
+        
+        # Добавляем праздники страны
+        try:
+            model.add_country_holidays(country_name=country)
+        except Exception as e:
+            logger.warning(f"Не удалось добавить праздники {country}: {e}")
+        
+        # Добавляем регрессоры
+        model.add_regressor('is_weekend')
+        model.add_regressor('day_of_month')
+        model.add_regressor('month')
+        
+        model.fit(df_agg)
+    except Exception as e:
+        logger.warning(f"Ошибка при обучении Prophet: {e}")
+        return {"error": f"Ошибка обучения Prophet: {str(e)}"}
 
     # Создание future dataframe
     if start_date and end_date:
@@ -76,19 +112,33 @@ def prophet_forecast(
         # Стандартный прогноз на periods дней
         future = model.make_future_dataframe(periods=periods)
 
+    # Добавляем регрессоры в future
+    future['is_weekend'] = future['ds'].dt.weekday.isin([5, 6]).astype(int)
+    future['day_of_month'] = future['ds'].dt.day
+    future['month'] = future['ds'].dt.month
+
     forecast = model.predict(future)
 
-    # Извлечение прогноза
+    # Извлечение прогноза с confidence intervals
     if start_date and end_date:
-        forecast_values = forecast['yhat'].values.tolist()
-        forecast_dates = forecast['ds'].dt.strftime('%Y-%m-%d').tolist()
-        forecast_points = [{"date": d, "forecast": f} for d, f in zip(forecast_dates, forecast_values)]
+        forecast_data = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(len(future))
+        forecast_points = [{
+            "date": row['ds'].strftime('%Y-%m-%d'),
+            "forecast": float(row['yhat']),
+            "lower_bound": float(row['yhat_lower']),
+            "upper_bound": float(row['yhat_upper'])
+        } for _, row in forecast_data.iterrows()]
     else:
-        forecast_values = forecast['yhat'].tail(periods).values.tolist()
-        forecast_points = forecast_values
+        forecast_data = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods)
+        forecast_points = [{
+            "date": row['ds'].strftime('%Y-%m-%d'),
+            "forecast": float(row['yhat']),
+            "lower_bound": float(row['yhat_lower']),
+            "upper_bound": float(row['yhat_upper'])
+        } for _, row in forecast_data.iterrows()]
 
     # Метрики (на основе исторических данных)
-    historical_forecast = model.predict(df_agg[['ds']])
+    historical_forecast = model.predict(df_agg[['ds', 'is_weekend', 'day_of_month', 'month']])
     mae = np.mean(np.abs(df_agg['y'] - historical_forecast['yhat']))
     rmse = np.sqrt(np.mean((df_agg['y'] - historical_forecast['yhat'])**2))
 
@@ -105,5 +155,6 @@ def prophet_forecast(
             "model_used": "prophet",
             "periods_requested": periods,
             "forecast_type": forecast_type,
+            "country": country,
         }
     }

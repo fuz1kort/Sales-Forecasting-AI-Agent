@@ -1,9 +1,13 @@
 """Утилиты для работы с данными и временными рядами."""
+from typing import Tuple, Optional
+
 import numpy as np
 import pandas as pd
+
 from backend.config.constants import COLUMN_KEYWORDS
 
-def find_columns(df: pd.DataFrame):
+
+def find_columns(df: pd.DataFrame) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """
     Определяет столбцы даты, продаж, магазина и товара в датафрейме.
 
@@ -49,6 +53,33 @@ def make_daily_series(df: pd.DataFrame, date_col: str, sales_col: str) -> pd.Ser
     """
     daily = df.groupby(date_col)[sales_col].sum()
     return daily.astype(float)
+
+def remove_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> pd.Series:
+    """
+    Удаляет outliers используя IQR (Interquartile Range) метод.
+    
+    Args:
+        series: Series для анализа
+        multiplier: Множитель для IQR (обычно 1.5 для среднего уровня, 3 для строгого)
+    
+    Returns:
+        Series без outliers (заменены на median)
+    """
+    Q1 = series.quantile(0.25)
+    Q3 = series.quantile(0.75)
+    IQR = Q3 - Q1
+    
+    lower_bound = Q1 - multiplier * IQR
+    upper_bound = Q3 + multiplier * IQR
+    
+    result = series.copy()
+    outliers_mask = (result < lower_bound) | (result > upper_bound)
+    
+    if outliers_mask.any():
+        median_val = series.median()
+        result[outliers_mask] = median_val
+    
+    return result
 
 def aggregate_transactions(df: pd.DataFrame, date_col: str, price_col: str = None, 
                           quantity_col: str = None, sales_col: str = None) -> pd.DataFrame:
@@ -173,7 +204,7 @@ def get_data_structure_info(df: pd.DataFrame) -> dict:
     }
 
 
-def smape(y_true, y_pred):
+def smape(y_true: np.ndarray | list, y_pred: np.ndarray | list) -> float:
     """
     Symmetric Mean Absolute Percentage Error (sMAPE).
 
@@ -184,14 +215,15 @@ def smape(y_true, y_pred):
     Returns:
         sMAPE в процентах
     """
-    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
     denominator = (np.abs(y_true) + np.abs(y_pred)) / 2
     diff = np.abs(y_true - y_pred) / denominator
     diff[denominator == 0] = 0.0  # Защита от деления на ноль
     return np.mean(diff) * 100
 
 
-def adf_test(series, title=''):
+def adf_test(series: pd.Series | np.ndarray, title: str = '') -> dict:
     """
     Augmented Dickey-Fuller test for stationarity.
 
@@ -203,6 +235,8 @@ def adf_test(series, title=''):
         Dict with test results
     """
     from statsmodels.tsa.stattools import adfuller
+
+    series = np.asarray(series, dtype=float)
     result = adfuller(series, autolag='AIC')
     output = {
         'Test Statistic': result[0],
@@ -214,28 +248,63 @@ def adf_test(series, title=''):
     }
     return output
 
-def calc_mae_mape(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+def calculate_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray | list,
+    round_to: int = 2
+) -> dict:
     """
-    Вычисляет MAE и MAPE между истинными и предсказанными значениями.
+    Вычисляет метрики качества: MAE, MAPE, RMSE.
 
     Args:
         y_true: Истинные значения
-        y_pred: Предсказанные значения
+        y_pred: Предсказанные значения (array или list)
+        round_to: Количество знаков после запятой
 
     Returns:
-        Словарь с метриками {'mae': float, 'mape': float}
+        Словарь с метриками {'mae': float, 'mape': float, 'rmse': float}
     """
+    # Нормализация длин
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    if len(y_true) != len(y_pred):
+        min_len = min(len(y_true), len(y_pred))
+        y_true = y_true[:min_len]
+        y_pred = y_pred[:min_len]
+
+    # MAE
     mae = float(np.mean(np.abs(y_true - y_pred)))
-    denominator = y_true.copy()
-    denominator[denominator == 0] = np.nan
-    mape = float(
-        np.nanmean(np.abs((y_true - y_pred) / denominator)) * 100
-    ) if np.isnan(denominator).any() is False else 0
 
-    return {"mae": mae, "mape": mape}
+    # MAPE (с обработкой нулей)
+    mask = y_true != 0
+    if mask.any():
+        mape = float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100)
+    else:
+        mape = 0.0
 
-def safe_number(value) -> float:
-    """Безопасное преобразование в float."""
+    # RMSE
+    rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+
+    return {
+        "mae": round(mae, round_to),
+        "mape": round(mape, round_to),
+        "rmse": round(rmse, round_to),
+    }
+
+
+def safe_number(value: any) -> float:
+    """
+    Безопасное преобразование в float с защитой от ошибок.
+
+    Преобразует значение в float, конвертируя NaN и inf в 0.0.
+
+    Args:
+        value: Значение для преобразования
+
+    Returns:
+        float значение или 0.0 если преобразование не удалось
+    """
     try:
         f = float(value)
         if np.isfinite(f):

@@ -1,63 +1,189 @@
 """Переменные окружения и конфигурация приложения."""
 import os
-from typing import Optional
+from typing import Optional, List
 
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 load_dotenv()
 
-class AppSettings:
+
+class AppSettings(BaseSettings):
     """Главные настройки приложения."""
+
     # FastAPI
-    API_TITLE: str = "Sales Forecasting Agent API"
-    API_DESCRIPTION: str = "Интеллектуальный агент для прогнозирования продаж"
-    API_VERSION: str = "3.0"
-    HOST: str = os.getenv("BACKEND_HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("BACKEND_PORT", "8000"))
+    api_title: str = "Sales Forecasting Agent API"
+    api_description: str = "Интеллектуальный агент для прогнозирования продаж"
+    api_version: str = "3.0"
+    host: str = "0.0.0.0"
+    port: int = 8000
 
     # LLM
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "yandex")
-    YANDEX_API_KEY: Optional[str] = os.getenv("YANDEX_API_KEY")
-    YANDEX_FOLDER_ID: Optional[str] = os.getenv("YANDEX_FOLDER_ID")
-    YANDEX_MODEL: str = os.getenv("YANDEX_MODEL", "yandexgpt-lite")
+    llm_provider: str = "yandex"
+    yandex_api_key: Optional[str] = None
+    yandex_folder_id: Optional[str] = None
+    yandex_model: str = "yandexgpt-lite"
 
     # Redis
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    SESSION_TTL_SECONDS: int = int(os.getenv("SESSION_TTL_SECONDS", "86400"))  # 24 часа
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    session_ttl_seconds: int = 86400  # 24 часа
 
     # Модели прогнозирования
-    DEFAULT_FORECAST_PERIODS: int = 30
-    MAX_BACKTEST_DAYS: int = 365
-    DEFAULT_MODEL: str = "sarima"
+    default_forecast_periods: int = 30
+    max_backtest_days: int = 365
+    default_model: str = "sarima"
 
     # CORS
-    CORS_ORIGINS: list = ["*"]
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list = ["*"]
-    CORS_ALLOW_HEADERS: list = ["*"]
+    cors_origins: List[str] = ["*"]
+    cors_allow_credentials: bool = True
+    cors_allow_methods: List[str] = ["*"]
+    cors_allow_headers: List[str] = ["*"]
 
     # Логирование
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    log_level: str = "INFO"
+    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Таймауты
-    UPLOAD_TIMEOUT: int = int(os.getenv("UPLOAD_TIMEOUT", "60"))
-    CHAT_TIMEOUT: int = int(os.getenv("CHAT_TIMEOUT", "120"))
-    FORECAST_TIMEOUT: int = int(os.getenv("FORECAST_TIMEOUT", "180"))
-    YANDEX_REQUEST_TIMEOUT: int = int(os.getenv("YANDEX_REQUEST_TIMEOUT", "120"))
+    upload_timeout: int = 60
+    chat_timeout: int = 120
+    forecast_timeout: int = 180
+    yandex_request_timeout: int = 120
 
     # Пределы
-    MAX_CSV_SIZE_MB: int = 100
-    MAX_FORECAST_PERIODS: int = 365
+    max_csv_size_mb: int = 100
+    max_forecast_periods: int = 365
 
+    class Config:
+        """Конфигурация для Pydantic."""
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+
+    @field_validator("llm_provider")
     @classmethod
-    def validate(cls) -> bool:
-        """Проверить критические параметры."""
-        if cls.LLM_PROVIDER == "yandex":
-            if not cls.YANDEX_API_KEY or not cls.YANDEX_FOLDER_ID:
+    def validate_llm_provider(cls, v: str, info):
+        """Проверяет, что если provider=yandex, то заданы ключи."""
+        if v == "yandex":
+            data = info.data
+            if not data.get("yandex_api_key") or not data.get("yandex_folder_id"):
                 raise ValueError(
                     "YANDEX_API_KEY и YANDEX_FOLDER_ID обязательны для provider='yandex'"
                 )
-        return True
+        return v
+
+    # Compatability with old snake_case property names
+    @property
+    def API_TITLE(self) -> str:
+        """Обратная совместимость."""
+        return self.api_title
+
+    @property
+    def API_DESCRIPTION(self) -> str:
+        return self.api_description
+
+    @property
+    def API_VERSION(self) -> str:
+        return self.api_version
+
+    @property
+    def HOST(self) -> str:
+        return self.host
+
+    @property
+    def PORT(self) -> int:
+        return self.port
+
+    @property
+    def YANDEX_API_KEY(self) -> Optional[str]:
+        return self.yandex_api_key
+
+    @property
+    def YANDEX_FOLDER_ID(self) -> Optional[str]:
+        return self.yandex_folder_id
+
+    @property
+    def YANDEX_MODEL(self) -> str:
+        return self.yandex_model
+
+    @property
+    def REDIS_HOST(self) -> str:
+        return self.redis_host
+
+    @property
+    def REDIS_PORT(self) -> int:
+        return self.redis_port
+
+    @property
+    def REDIS_DB(self) -> int:
+        return self.redis_db
+
+    @property
+    def SESSION_TTL_SECONDS(self) -> int:
+        return self.session_ttl_seconds
+
+    @property
+    def DEFAULT_FORECAST_PERIODS(self) -> int:
+        return self.default_forecast_periods
+
+    @property
+    def MAX_BACKTEST_DAYS(self) -> int:
+        return self.max_backtest_days
+
+    @property
+    def DEFAULT_MODEL(self) -> str:
+        return self.default_model
+
+    @property
+    def CORS_ORIGINS(self) -> List[str]:
+        return self.cors_origins
+
+    @property
+    def CORS_ALLOW_CREDENTIALS(self) -> bool:
+        return self.cors_allow_credentials
+
+    @property
+    def CORS_ALLOW_METHODS(self) -> List[str]:
+        return self.cors_allow_methods
+
+    @property
+    def CORS_ALLOW_HEADERS(self) -> List[str]:
+        return self.cors_allow_headers
+
+    @property
+    def LOG_LEVEL(self) -> str:
+        return self.log_level
+
+    @property
+    def LOG_FORMAT(self) -> str:
+        return self.log_format
+
+    @property
+    def UPLOAD_TIMEOUT(self) -> int:
+        return self.upload_timeout
+
+    @property
+    def CHAT_TIMEOUT(self) -> int:
+        return self.chat_timeout
+
+    @property
+    def FORECAST_TIMEOUT(self) -> int:
+        return self.forecast_timeout
+
+    @property
+    def YANDEX_REQUEST_TIMEOUT(self) -> int:
+        return self.yandex_request_timeout
+
+    @property
+    def MAX_CSV_SIZE_MB(self) -> int:
+        return self.max_csv_size_mb
+
+    @property
+    def MAX_FORECAST_PERIODS(self) -> int:
+        return self.max_forecast_periods
+
+    @property
+    def LLM_PROVIDER(self) -> str:
+        return self.llm_provider

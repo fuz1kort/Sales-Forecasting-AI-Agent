@@ -1,7 +1,7 @@
 """Главный модуль FastAPI."""
 import logging
-import sys
 import os
+import sys
 from typing import Optional
 
 # Add the project root to Python path for imports
@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.agent.smol_agent import SmolSalesAgent
 from backend.agent.state import get_session_manager
-from backend.agent.tools import get_dataset_info
+from backend.agent.tools import get_dataset_info, load_dataset
 from backend.config import AppSettings
 
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +60,6 @@ async def upload_dataset(
         content = await file.read()
         csv_text = content.decode("utf-8", errors="ignore")
 
-        from backend.agent.tools import load_dataset
         result = load_dataset(
             csv_content=csv_text,
             session_id=session_id
@@ -71,6 +70,7 @@ async def upload_dataset(
     except Exception as e:
         logger.error(f"Ошибка загрузки: {e}")
         raise HTTPException(status_code=400, detail=f"Ошибка загрузки: {str(e)}")
+
 
 
 @app.post("/chat")

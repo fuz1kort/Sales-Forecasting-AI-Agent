@@ -1,26 +1,37 @@
+# === Веб-фреймворк ===
 fastapi
 uvicorn
+python-multipart
+
+# === Данные и обработка ===
 pandas
 numpy
-matplotlib
-sentence-transformers
-requests
-streamlit
-python-dotenv
-prophet
-openai
-aiogram
-lightgbm
-python-multipart
-plotly
-statsmodels
-smolagents[litellm]
-accelerate
-redis
-datasets
-uuid
+scipy
 scikit-learn
+
+# === Временные ряды ===
+prophet
+statsmodels
+pmdarima
+lightgbm
 catboost
 xgboost
-scipy
+
+# === AI/ML ===
+smolagents[litellm]
+sentence-transformers
+openai
+
+# === Фронтенд ===
+streamlit
+plotly
+matplotlib
+
+# === Утилиты ===
+requests
+redis
+python-dotenv
+aiogram
+
+# === Загрузка данных ===
 kagglehub

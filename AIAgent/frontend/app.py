@@ -11,15 +11,27 @@ from utils.api_client import APIClient
 
 
 def _dedupe_history(history: list[dict]) -> list[dict]:
+    """
+    Удаляет дубликаты из истории чата.
+
+    Дубликаты возникают когда подряд приходят сообщения от одного того же роля
+    с идентичным содержимым.
+
+    Args:
+        history: Исходная история сообщений
+
+    Returns:
+        Очищенная история без дублей
+    """
     cleaned = []
     for item in history:
         if not cleaned or cleaned[-1].get("role") != item.get("role") or cleaned[-1].get("content") != item.get("content"):
             cleaned.append(item)
     return cleaned
 
-# TODO переработать UI
+
 def main():
-    """Запуск приложения."""
+    """Запуск приложения Streamlit для взаимодействия с агентом."""
     st.set_page_config(
         page_title="Sales Forecasting Agent",
         page_icon="📈",
@@ -67,8 +79,6 @@ def main():
     # Если есть данные — показываем остальное
     if st.session_state.dataset_info:
         render_metrics_panel(st.session_state.dataset_info)
-        st.divider()
-
         st.divider()
 
         # Всегда показываем чат после загрузки

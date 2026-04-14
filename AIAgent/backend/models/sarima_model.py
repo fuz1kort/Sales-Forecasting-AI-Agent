@@ -3,13 +3,26 @@
 
 Использует статистические методы (сезонные авторегрессионные модели)
 для прогнозирования временных рядов продаж.
+
+По умолчанию использует Auto-ARIMA (автоматический подбор параметров).
+Если pmdarima не установлена, использует SARIMA с фиксированными параметрами.
 """
 
 import pandas as pd
 import numpy as np
 import importlib
+import logging
+from typing import Optional, List
+
+try:
+    from pmdarima import auto_arima
+    HAS_AUTO_ARIMA = True
+except ImportError:
+    HAS_AUTO_ARIMA = False
 
 from backend.utils import find_columns
+
+logger = logging.getLogger(__name__)
 
 def sarima_forecast(
     df: pd.DataFrame,
@@ -187,7 +200,7 @@ def _fit_and_forecast_store(daily, store_id, periods, SARIMAX):
         enforce_invertibility=False,
     )
     fitted = model.fit(disp=False)
-    fc_res = fitted.get_forecast_by_session(steps=periods)
+    fc_res = fitted.get_forecast(steps=periods)
     fc_values = fc_res.predicted_mean
     conf_int = fc_res.conf_int(alpha=0.1)
 
@@ -247,7 +260,7 @@ def _fit_and_forecast_general(daily, periods, SARIMAX):
         enforce_invertibility=False,
     )
     fitted = model.fit(disp=False)
-    fc_res = fitted.get_forecast_by_session(steps=periods)
+    fc_res = fitted.get_forecast(steps=periods)
     fc_values = fc_res.predicted_mean
     conf_int = fc_res.conf_int(alpha=0.1)
 

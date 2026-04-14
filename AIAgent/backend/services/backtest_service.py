@@ -5,6 +5,11 @@
 Используется из:
 - forecast_service.py (для auto-выбора модели)
 - agent/tools/forecast/backtest_tools.py (для @tool run_backtest)
+
+Тестирует модели:
+- SARIMA (с поддержкой Auto-ARIMA)
+- Prophet (с праздниками и регрессорами)
+- CatBoost Ensemble
 """
 import logging
 from typing import Optional
@@ -12,7 +17,7 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-from backend.utils import find_columns
+from backend.utils import find_columns, calculate_metrics
 from backend.models import sarima_forecast
 from backend.models.prophet_model import prophet_forecast
 from backend.models.catboost_model import ensemble_forecast_optimized
@@ -128,37 +133,13 @@ def _test_model(
         predicted = [p["forecast"] for p in result["forecast"][:len(test_df)]]
         actual = test_df[sales_col].values[:len(predicted)]
 
-        metrics = _calc_metrics(actual, predicted)
+        metrics = calculate_metrics(actual, predicted)
         metrics["predicted"] = predicted  # для визуализации
         return metrics
 
     except Exception as e:
         logger.error(f"{name} test error: {e}")
         return {"error": str(e)}
-
-
-def _calc_metrics(actual: np.ndarray, predicted: list) -> dict:
-    """Вычисляет MAE, MAPE, RMSE."""
-    if len(actual) != len(predicted):
-        min_len = min(len(actual), len(predicted))
-        actual = actual[:min_len]
-        predicted = predicted[:min_len]
-
-    actual = np.array(actual, dtype=float)
-    predicted = np.array(predicted, dtype=float)
-
-    mae = float(np.mean(np.abs(actual - predicted)))
-
-    mask = actual != 0
-    mape = float(np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100) if mask.any() else 0.0
-
-    rmse = float(np.sqrt(np.mean((actual - predicted) ** 2)))
-
-    return {
-        "mae": round(mae, 2),
-        "mape": round(mape, 2),
-        "rmse": round(rmse, 2),
-    }
 
 
 def _select_best_by_mape(metrics: dict) -> str:
